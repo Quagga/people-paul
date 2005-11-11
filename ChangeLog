@@ -1,6 +1,13 @@
-2005-11-03 Paul Jakma <paul.jakma@sun.com>
+2005-11-11 Paul Jakma <paul.jakma@sun.com>
 
-	* NEWS: Update
+	* NEWS: Update.
+	* configure.ac: Bump to 0.99.2
+
+2005-11-10 Paul Jakma <paul.jakma@sun.com>
+
+	* HACKING: Add recommendation to provide a single Subject
+	  style description to the commit message.
+	  Add some recommendations for ChangeLog.
 
 2005-09-29 Paul Jakma <paul.jakma@sun.com>
 
