@@ -20,6 +20,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #ifndef _ZEBRA_MEMORY_H
 #define _ZEBRA_MEMORY_H
+#include "vty.h"
 
 /* For pretty printing of memory allocate information. */
 struct memory_list
