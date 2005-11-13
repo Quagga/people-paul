@@ -1,5 +1,37 @@
 2005-11-12 Paul Jakma <paul.jakma@sun.com>
 
+	* memory.c: (general) Add caching of specified types.
+	  Factor of 2 improvement in malloc times for heavily reused
+	  objects. Minor degradation in worst-case usage objects, about
+	  10% overhead, however those kinds of objects should NOT be
+	  marked cacheable anyway.
+	  (struct mstat) Add extra fields for caching.
+	  (alloc_inc) Add tide tracking.
+	  (alloc_dec) ditto.
+	  (zmemory_cache_free) new function, free all cached objects
+	  for a type.
+	  (zmemory_cache_invalidate) new function, invalidate cache,
+	  typically because different size requests have been made
+	  which means caching is no longer safe.
+	  (zmemory_cache_lookup) Quick by-type cache to short-circuit
+	  malloc/free for objects we can easily cache.
+	  (zmemory_cache_add) new function, potentially cache objects
+	  which are freed for reuse.
+	  (zmalloc) Try satisfy request from cache.
+	  (zcalloc) ditto
+	  (zrealloc) invalidate cache - size changes.
+	  (zfree) Try cache object rather freeing, via zmemory_cache_add.
+	  (zstrdup) Invalidate cache
+	  (show_memory_vty_header) Add support for cache headers.
+	  (show_memory_vty) Add support for the new stats and cache
+	  fields.
+	  (memory_init) Initialise the mstat array's cacheable field
+	  from memory_lists.
+	* memory.h: Add cacheable ENUM.
+	  Add cacheable field to struct memory_list.
+
+2005-11-12 Paul Jakma <paul.jakma@sun.com>
+
 	* memory.c: (general) Add optional extra useage-stats gathering.	  
 	  (struct mstat) Compile time optional fields for extra statistics.
 	  (alloc_inc) move to top, mark for inlining. Add mstats supports.
@@ -12,7 +44,7 @@
 	  (show_memory_vty) Add support for the new stats fields
 	* memory.h: Include vty.h, compile warning. 
 
-2005-11-12 Paul Jakma <paul.jakma@sun.com>
+2005-11-05 Paul Jakma <paul.jakma@sun.com>
 
 	* routemap.c: (vty_show_route_map_entry) call action is
 	  seperate from exit action, latter should still be printed

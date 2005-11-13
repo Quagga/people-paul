@@ -22,11 +22,14 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #define _ZEBRA_MEMORY_H
 #include "vty.h"
 
+enum mtype_cacheable { MTYPE_NOCACHE = 0, MTYPE_CACHE = 1 };
+
 /* For pretty printing of memory allocate information. */
 struct memory_list
 {
   int index;
   const char *format;
+  enum mtype_cacheable cacheable;
 };
 
 struct mlist {
