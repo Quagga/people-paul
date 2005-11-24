@@ -215,11 +215,9 @@ DEFUN (ospf_router_id,
     }
 
   ospf->router_id_static = router_id;
-
-  if (ospf->t_router_id_update == NULL)
-    OSPF_TIMER_ON (ospf->t_router_id_update, ospf_router_id_update_timer,
-		   OSPF_ROUTER_ID_UPDATE_DELAY);
-
+  
+  ospf_router_id_update (ospf);
+  
   return CMD_SUCCESS;
 }
 
@@ -2520,7 +2518,7 @@ show_ip_ospf_area (struct vty *vty, struct ospf_area *area)
   /* Stub-router state for this area */
   if (CHECK_FLAG (area->stub_router_state, OSPF_AREA_IS_STUB_ROUTED))
     {
-      char timebuf[9];
+      char timebuf[OSPF_TIME_DUMP_SIZE];
       vty_out (vty, "   Originating stub / maximum-distance Router-LSA%s",
                VTY_NEWLINE);
       if (CHECK_FLAG(area->stub_router_state, OSPF_AREA_ADMIN_STUB_ROUTED))
@@ -2592,7 +2590,7 @@ DEFUN (show_ip_ospf,
   struct ospf_area * area;
   struct ospf *ospf;
   struct timeval result;
-  char timebuf[13]; /* XX:XX:XX.XXX(nul) */
+  char timebuf[OSPF_TIME_DUMP_SIZE];
 
   /* Check OSPF is enable. */
   ospf = ospf_lookup ();
@@ -2706,7 +2704,6 @@ show_ip_ospf_interface_sub (struct vty *vty, struct ospf *ospf,
   int is_up;
   struct ospf_neighbor *nbr;
   struct route_node *rn;
-  char buf[9];
 
   /* Is interface up? */
   vty_out (vty, "%s is %s%s", ifp->name,
@@ -2818,14 +2815,9 @@ show_ip_ospf_interface_sub (struct vty *vty, struct ospf *ospf,
       
       if (OSPF_IF_PARAM (oi, passive_interface) == OSPF_IF_ACTIVE)
         {
-          int timer_slen = 9; /* length of "hh:mm:ss(nul)" */
-          
-          /* for fast hello we also want to see the .XXXX ms part */
-          if (OSPF_IF_PARAM (oi, fast_hello))
-            timer_slen += 5;
-          
+	  char timebuf[OSPF_TIME_DUMP_SIZE];
 	  vty_out (vty, "    Hello due in %s%s",
-		   ospf_timer_dump (oi->t_hello, buf, timer_slen), 
+		   ospf_timer_dump (oi->t_hello, timebuf, sizeof(timebuf)), 
 		   VTY_NEWLINE);
         }
       else /* OSPF_IF_PASSIVE is set */
@@ -2884,7 +2876,7 @@ show_ip_ospf_neighbor_sub (struct vty *vty, struct ospf_interface *oi)
   struct route_node *rn;
   struct ospf_neighbor *nbr;
   char msgbuf[16];
-  char timebuf[14];
+  char timebuf[OSPF_TIME_DUMP_SIZE];
 
   for (rn = route_top (oi->nbrs); rn; rn = route_next (rn))
     if ((nbr = rn->info))
@@ -3035,7 +3027,7 @@ static void
 show_ip_ospf_nbr_nbma_detail_sub (struct vty *vty, struct ospf_interface *oi,
 				  struct ospf_nbr_nbma *nbr_nbma)
 {
-  char timebuf[9];
+  char timebuf[OSPF_TIME_DUMP_SIZE];
 
   /* Show neighbor ID. */
   vty_out (vty, " Neighbor %s,", "-");
@@ -3069,7 +3061,7 @@ static void
 show_ip_ospf_neighbor_detail_sub (struct vty *vty, struct ospf_interface *oi,
 				  struct ospf_neighbor *nbr)
 {
-  char timebuf[9];
+  char timebuf[OSPF_TIME_DUMP_SIZE];
 
   /* Show neighbor ID. */
   if (nbr->state == NSM_Attempt && nbr->router_id.s_addr == 0)

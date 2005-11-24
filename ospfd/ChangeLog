@@ -1,3 +1,64 @@
+2005-11-20 Paul Jakma <paul.jakma@sun.com>
+
+        * ospfd.h: remove the OSPF_ROUTER_ID_UPDATE_DELAY define
+          (struct ospf) remove the router_id timer thread.
+          remove export of ospf_router_id_update_timer.   
+        * ospfd.c: (ospf_router_id_update) call ospf_if_update to
+          poke interfaces into action after ID has been configured.
+          (ospf_router_id_update_timer) removed.
+          (ospf_finish_final) t_router_id_update timer is gone.
+          (ospf_network_run) router-id update timer gone.
+          call ospf_router_id_update directly if ID not configured.
+          In the per-iface loop, don't ospf_if_up interfaces if
+          ID is still not configured. The update function will call
+          ospf_if_update anyway.
+          (ospf_if_update) ID update timer is gone. Just return if no
+          ID is set.
+        * ospf_vty.c: (ospf_router_id) call ospf_router_id_update, no
+          timer needed.
+        * ospf_zebra.c: (ospf_router_id_update_zebra) call
+          ospf_router_id_update directly, not via timer.  
+        * ospf_abr.c: (ospf_abr_announce_network_to_area) check
+          returned LSA of ospf_summary_lsa_refresh and print warning if
+          it failed.
+          (ospf_abr_announce_network_to_area) similar
+          (ospf_abr_announce_rtr_to_area) similar 
+        * ospf_lsa.c: (ospf_router_lsa_new) check LSA returned is valid.
+          (ospf_router_lsa_originate) similar
+          (ospf_router_lsa_refresh, ospf_network_lsa_new) similar  
+          (ospf_summary_lsa_new) Check ID is valid.
+          (ospf_summary_lsa_originate) ditto, and check returned LSA from
+           previous function is !NULL.
+          (ospf_summary_lsa_refresh) check ospf_summary_lsa_new return
+           is !NULL.
+          (ospf_summary_asbr_lsa_new) ID valid check.
+          (ospf_summary_asbr_lsa_originate) similar.
+
+2005-11-16 Andrew J. Schorr <ajschorr@alumni.princeton.edu>
+
+	* ospf_dump.h: Define OSPF_TIME_DUMP_SIZE as appropriate buffer size
+	  for use with ospf_timer_dump and ospf_timeval_dump.
+	* ospf_vty.c: Change all buffer sizes used with ospf_timer_dump and
+	  ospf_timeval_dump to have size OSPF_TIME_DUMP_SIZE.
+	  (show_ip_ospf_interface_sub) Fix possible buffer overflow in
+	  call to ospf_timer_dump.
+
+2005-11-16 Andrew J. Schorr <ajschorr@alumni.princeton.edu>
+
+	* ospf_ism.h: (OSPF_ISM_TIMER_OFF) Improve macro syntax by enclosing
+	  in 'do {...} while(0)'.
+
+2005-11-14 Paul Jakma <paul.jakma@sun.com>
+
+	* ospfd.c: (ospf_new) stub-shutdown should just default to
+	  unconfigured, too strange otherwise.
+	  (ospf_finish_final) t_opaque_lsa_self TIMER_OFF should be
+	  preprocessor conditional on HAVE_OPAQUE_LSA.
+	* ospfd.h: (struct ospf) remove the SHUTDOWN_DEFAULT define.
+	  no longer used, plus it wasn't in range that the command
+	  accepted.
+	* ospf_zebra.h: Depends on vty.h, include it.
+
 2005-11-11 Paul Jakma <paul.jakma@sun.com>
 
 	* ospf_spf.c: (ospf_canonical_nexthops_free) Free only
