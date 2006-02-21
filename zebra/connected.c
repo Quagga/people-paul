@@ -140,7 +140,8 @@ connected_up_ipv4 (struct interface *ifp, struct connected *ifc)
   if (prefix_ipv4_any (&p))
     return;
 
-  rib_add_ipv4 (ZEBRA_ROUTE_CONNECT, 0, &p, NULL, ifp->ifindex, 0, 0, 0);
+  rib_add_ipv4 (ZEBRA_ROUTE_CONNECT, 0, &p, NULL, ifp->ifindex, 0, 
+                ifp->metric, 0);
 
   rib_update ();
 }
@@ -322,7 +323,8 @@ connected_up_ipv6 (struct interface *ifp, struct connected *ifc)
     return;
 #endif
 
-  rib_add_ipv6 (ZEBRA_ROUTE_CONNECT, 0, &p, NULL, ifp->ifindex, 0, 0, 0);
+  rib_add_ipv6 (ZEBRA_ROUTE_CONNECT, 0, &p, NULL, ifp->ifindex, 0,
+                ifp->metric, 0);
 
   rib_update ();
 }
@@ -330,7 +332,8 @@ connected_up_ipv6 (struct interface *ifp, struct connected *ifc)
 /* Add connected IPv6 route to the interface. */
 void
 connected_add_ipv6 (struct interface *ifp, struct in6_addr *addr,
-		    u_char prefixlen, struct in6_addr *broad, char *label)
+		    u_char prefixlen, struct in6_addr *broad,
+		    const char *label)
 {
   struct prefix_ipv6 *p;
   struct connected *ifc;

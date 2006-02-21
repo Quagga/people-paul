@@ -257,19 +257,19 @@ ospf_get ()
   return ospf;
 }
 
-/* Handle the second half of graceful shutdown. This is called either
- * from the graceful-shutdown timer thread, or directly through
- * ospf_graceful_shutdown_check.
+/* Handle the second half of deferred shutdown. This is called either
+ * from the deferred-shutdown timer thread, or directly through
+ * ospf_deferred_shutdown_check.
  *
  * Function is to cleanup G-R state, if required then call ospf_finish_final
  * to complete shutdown of this ospf instance. Possibly exit if the
  * whole process is being shutdown and this was the last OSPF instance.
  */
 static void
-ospf_graceful_shutdown_finish (struct ospf *ospf)
+ospf_deferred_shutdown_finish (struct ospf *ospf)
 {
   ospf->stub_router_shutdown_time = OSPF_STUB_ROUTER_UNCONFIGURED;  
-  OSPF_TIMER_OFF (ospf->t_graceful_shutdown);
+  OSPF_TIMER_OFF (ospf->t_deferred_shutdown);
   
   ospf_finish_final (ospf);
   
@@ -285,27 +285,27 @@ ospf_graceful_shutdown_finish (struct ospf *ospf)
 
 /* Timer thread for G-R */
 static int
-ospf_graceful_shutdown_timer (struct thread *t)
+ospf_deferred_shutdown_timer (struct thread *t)
 {
   struct ospf *ospf = THREAD_ARG(t);
   
-  ospf_graceful_shutdown_finish (ospf);
+  ospf_deferred_shutdown_finish (ospf);
   
   return 0;
 }
 
-/* Check whether graceful-shutdown must be scheduled, otherwise call
+/* Check whether deferred-shutdown must be scheduled, otherwise call
  * down directly into second-half of instance shutdown.
  */
 static void
-ospf_graceful_shutdown_check (struct ospf *ospf)
+ospf_deferred_shutdown_check (struct ospf *ospf)
 {
   unsigned long timeout;
   struct listnode *ln;
   struct ospf_area *area;
   
-  /* graceful shutdown already running? */
-  if (ospf->t_graceful_shutdown)
+  /* deferred shutdown already running? */
+  if (ospf->t_deferred_shutdown)
     return;
   
   /* Should we try push out max-metric LSAs? */
@@ -321,10 +321,13 @@ ospf_graceful_shutdown_check (struct ospf *ospf)
       timeout = ospf->stub_router_shutdown_time;
     }
   else
-    /* No timer needed */
-    return ospf_graceful_shutdown_finish (ospf);
+    {
+      /* No timer needed */
+      ospf_deferred_shutdown_finish (ospf);
+      return;
+    }
   
-  OSPF_TIMER_ON (ospf->t_graceful_shutdown, ospf_graceful_shutdown_timer,
+  OSPF_TIMER_ON (ospf->t_deferred_shutdown, ospf_deferred_shutdown_timer,
                  timeout);
   return;
 }
@@ -354,13 +357,14 @@ ospf_terminate (void)
 void
 ospf_finish (struct ospf *ospf)
 {
-  /* let graceful shutdown decide */
-  return ospf_graceful_shutdown_check (ospf);
+  /* let deferred shutdown decide */
+  ospf_deferred_shutdown_check (ospf);
       
-  /* if ospf_graceful_shutdown returns, then ospf_finish_final is
+  /* if ospf_deferred_shutdown returns, then ospf_finish_final is
    * deferred to expiry of G-S timer thread. Return back up, hopefully
    * to thread scheduler.
    */
+  return;
 }
 
 /* Final cleanup of ospf instance */
@@ -821,7 +825,7 @@ ospf_network_run (struct ospf *ospf, struct prefix *p, struct ospf_area *area)
   struct listnode *node;
 
   /* Schedule Router ID Update. */
-  if (ospf->router_id_static.s_addr == 0)
+  if (ospf->router_id.s_addr == 0)
     ospf_router_id_update (ospf);
   
   /* Get target interface. */
@@ -855,24 +859,14 @@ ospf_network_run (struct ospf *ospf, struct prefix *p, struct ospf_area *area)
 		oi = ospf_if_new (ospf, ifp, co->address);
 		oi->connected = co;
 		
-		oi->nbr_self->address = *oi->address;
-
 		oi->area = area;
 
 		oi->params = ospf_lookup_if_params (ifp, oi->address->u.prefix4);
 		oi->output_cost = ospf_if_get_output_cost (oi);
 		
-		if (area->external_routing != OSPF_AREA_DEFAULT)
-		  UNSET_FLAG (oi->nbr_self->options, OSPF_OPTION_E);
-		oi->nbr_self->priority = OSPF_IF_PARAM (oi, priority);
-		
 		/* Add pseudo neighbor. */
 		ospf_nbr_add_self (oi);
 
-		/* Make sure pseudo neighbor's router_id. */
-		oi->nbr_self->router_id = ospf->router_id;
-		oi->nbr_self->src = oi->address->u.prefix4;
-		
 		/* Relate ospf interface to ospf instance. */
 		oi->ospf = ospf;
 
@@ -881,21 +875,6 @@ ospf_network_run (struct ospf *ospf, struct prefix *p, struct ospf_area *area)
 		   skip network type setting. */
 		oi->type = IF_DEF_PARAMS (ifp)->type;
 		
-		/* Set area flag. */
-		switch (area->external_routing)
-		  {
-		  case OSPF_AREA_DEFAULT:
-		    SET_FLAG (oi->nbr_self->options, OSPF_OPTION_E);
-		    break;
-		  case OSPF_AREA_STUB:
-		    UNSET_FLAG (oi->nbr_self->options, OSPF_OPTION_E);
-		    break;
-		  case OSPF_AREA_NSSA:
-		    UNSET_FLAG (oi->nbr_self->options, OSPF_OPTION_E);
-		    SET_FLAG (oi->nbr_self->options, OSPF_OPTION_NP);
-		    break;
-		  }
-
 		ospf_area_add_if (oi->area, oi);
 		
 		/* if router_id is not configured, dont bring up
@@ -903,7 +882,7 @@ ospf_network_run (struct ospf *ospf, struct prefix *p, struct ospf_area *area)
                  * ospf_router_id_update() will call ospf_if_update
                  * whenever r-id is configured instead.
                  */
-		if ((ospf->router_id_static.s_addr != 0)
+		if ((ospf->router_id.s_addr != 0)
 		    && if_is_operative (ifp)) 
 		  ospf_if_up (oi);
 
@@ -952,7 +931,7 @@ ospf_if_update (struct ospf *ospf)
   if (ospf != NULL)
     {
       /* Router-ID must be configured. */
-      if (ospf->router_id_static.s_addr == 0)
+      if (ospf->router_id.s_addr == 0)
         return;
       
       /* Find interfaces that not configured already.  */

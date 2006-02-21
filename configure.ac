@@ -5,10 +5,10 @@
 ##  Copyright (c) 1996, 97, 98, 99, 2000 Kunihiro Ishiguro <kunihiro@zebra.org>
 ##  Portions Copyright (c) 2003 Paul Jakma <paul@dishone.st>
 ##
-## $Id: configure.ac,v 1.115 2005/11/14 14:05:36 paul Exp $
+## $Id: configure.ac,v 1.118 2006/01/31 10:09:27 paul Exp $
 AC_PREREQ(2.53)
 
-AC_INIT(Quagga, 0.99.2, [http://bugzilla.quagga.net])
+AC_INIT(Quagga, 0.99.3, [http://bugzilla.quagga.net])
 AC_CONFIG_SRCDIR(lib/zebra.h)
 
 dnl -----------------------------------
@@ -68,13 +68,22 @@ dnl Intel compiler check. Although Intel tries really hard to make icc
 dnl look like gcc, there are some differences. It's very verbose with
 dnl -Wall and it doesn't support the individual -W options.
 dnl ------------------------------------------------------------------
-AC_MSG_CHECKING([whether we are using the Intel compiler])
-AC_EGREP_CPP([^__INTEL_COMPILER], [__INTEL_COMPILER],
-    ICC="no"
-    AC_MSG_RESULT([no]),
-    ICC="yes"
-    AC_MSG_RESULT([yes])
-)
+if test "x${GCC}" = "xyes" ; then
+  COMPILER="GCC"
+  AC_MSG_CHECKING([whether we are using the Intel compiler])
+  AC_EGREP_CPP([^__INTEL_COMPILER], [__INTEL_COMPILER],
+      [AC_MSG_RESULT([no])],
+      [COMPILER="ICC"
+       AC_MSG_RESULT([yes])]
+  )
+else
+  AC_MSG_CHECKING([whether we are using SunPro compiler])
+  AC_EGREP_CPP([^__SUNPRO_C.*0x5(7|8|9)], ["__SUNPRO_C" __SUNPRO_C],
+      [AC_MSG_RESULT([no])],
+      [COMPILER="SUNPRO"
+       AC_MSG_RESULT([yes])]
+  )
+fi
 
 dnl ---------------------------------------------
 dnl If CLFAGS doesn\'t exist set default value
@@ -82,32 +91,46 @@ dnl AC_PROG_CC will have set minimal default
 dnl already, eg "-O2 -g" for gcc, "-g" for others
 dnl (Wall is gcc specific... have to make sure
 dnl  gcc is being used before setting it)
-dnl Intel icc 8.0 also sets __GNUC__, but
-dnl doesn't support all these fancy -W options.
-dnl ---------------------------------------------
 dnl
-if test "x$cflags_specified" = "x" ; then
-  if test "x${GCC}" = "xyes" && test "x${ICC}" = "xno"; then
-  	CFLAGS="-Os -fno-omit-frame-pointer -g -std=c99 -Wall"
-  	CFLAGS="${CFLAGS} -Wsign-compare -Wpointer-arith"
-  	CFLAGS="${CFLAGS} -Wbad-function-cast -Wwrite-strings"
-  	CFLAGS="${CFLAGS} -Wmissing-prototypes -Wmissing-declarations"
-  	CFLAGS="${CFLAGS} -Wchar-subscripts -Wcast-qual"
-  fi
-  # TODO: conditionally addd -Wpacked if handled
-fi
-
-dnl ---------------------------------------------------------------------
+dnl Intel icc 8.0 also sets __GNUC__, 
+dnl but doesn't support all these fancy -W options.
 dnl Intel compiler warnings we ignore:
 dnl 279: controlling expression is constant.
 dnl 869: parameter "xxx" was never referenced - to avoid massive warnings
 dnl      about "self", "vty", "argc" and "argv" never referenced in DEFUN
 dnl      macro.
 dnl 981: operands are evaluated in unspecified order.
-dnl ---------------------------------------------------------------------
+dnl
+dnl Sun Studio 10 / SunPro 5.7 is also supported,
+dnl so lets set some sane CFLAGS for it.
+dnl ---------------------------------------------
 
-if test "$ICC" = "yes"; then
-    CFLAGS="-Os -g -Wall -wd 279,869,981"
+AC_MSG_CHECKING([whether to set a default CFLAGS])
+if test "x${cflags_specified}" = "x" ; then
+  case ${COMPILER} in
+    "ICC")
+        CFLAGS="-Os -g -Wall -wd 279,869,981"
+        AC_MSG_RESULT([Intel default])
+        ;;
+    "GCC")
+  	CFLAGS="-Os -fno-omit-frame-pointer -g -std=c99 -Wall"
+  	CFLAGS="${CFLAGS} -Wsign-compare -Wpointer-arith"
+  	CFLAGS="${CFLAGS} -Wbad-function-cast -Wwrite-strings"
+  	CFLAGS="${CFLAGS} -Wmissing-prototypes -Wmissing-declarations"
+  	CFLAGS="${CFLAGS} -Wchar-subscripts -Wcast-qual"
+  	# TODO: conditionally addd -Wpacked if handled
+  	AC_MSG_RESULT([gcc default])
+  	;;
+    "SUNPRO")
+  	CFLAGS="-xO4 -xspace -xcode=pic32 -xstrconst -Xt -xc99"
+  	AC_MSG_RESULT([SunPro default])
+  	;;
+    *)
+        AC_MSG_RESULT([unknown compiler])
+        ;;
+  esac
+else
+  AC_MSG_RESULT([CFLAGS supplied by user])
 fi
 
 dnl --------------
@@ -969,99 +992,34 @@ AC_CHECK_LIB(c, regexec,
 AC_SUBST(LIB_REGEX)
 
 dnl ------------------
-dnl check SNMP library
+dnl check Net-SNMP library
 dnl ------------------
-if test "${enable_snmp}" = "yes";then
-dnl  AC_CHECK_LIB(snmp, asn_parse_int, HAVE_SNMP=yes)
-  if test "${HAVE_SNMP}" = ""; then
-    old_libs="${LIBS}"
-    LIBS="-L/usr/lib"
-    unset ac_cv_lib_snmp_asn_parse_int
-    AC_CHECK_LIB(crypto, main, NEED_CRYPTO=yes, )
-    if test "${NEED_CRYPTO}" = ""; then
-      AC_CHECK_LIB(netsnmp, asn_parse_int, [HAVE_NETSNMP=yes; HAVE_SNMP=yes ])
-    else
-      AC_CHECK_LIB(netsnmp, asn_parse_int, [HAVE_NETSNMP=yes; HAVE_SNMP=yes; NEED_CRYPTO=yes;LIBS="$LIBS -lcrypto" ],,"-lcrypto")
-    fi
-    LIBS="${old_libs}"
-  fi
-  if test "${HAVE_SNMP}" = ""; then
-    old_libs="${LIBS}"
-    LIBS="-L/usr/lib"
-    unset ac_cv_lib_snmp_asn_parse_int
-    AC_CHECK_LIB(snmp, asn_parse_int, HAVE_SNMP=yes, )
-    if test "${HAVE_SNMP}" = ""; then
-      unset ac_cv_lib_snmp_asn_parse_int
-      AC_CHECK_LIB(crypto, main, NEED_CRYPTO=yes, )
-      if test "${NEED_CRYPTO}" = "yes"; then 
-        AC_CHECK_LIB(snmp, asn_parse_int, [HAVE_SNMP=yes; NEED_CRYPTO=yes; LIBS="$LIBS -lcrypto" ],,"-lcrypto")
-      fi
-    fi
-    LIBS="${old_libs}"
-  fi
-
-  if test "${HAVE_SNMP}" = ""; then
-    old_libs="${LIBS}"
-    LIBS="-L/usr/local/lib"
-    unset ac_cv_lib_snmp_asn_parse_int
-    AC_CHECK_LIB(snmp, asn_parse_int, HAVE_SNMP=yes)
-    if test "${HAVE_SNMP}" = ""; then
-      unset ac_cv_lib_snmp_asn_parse_int
-      AC_CHECK_LIB(crypto, main, NEED_CRYPTO=yes, )
-      if test "${NEED_CRYPTO}" = "yes"; then
-        AC_CHECK_LIB(snmp, asn_parse_int, [HAVE_SNMP=yes; NEED_CRYPTO=yes; LIBS="$LIBS -lcrypto" ],,"-lcrypto")
-      fi
-    fi
-    LIBS="${old_libs}"
-  fi
-
-  if test "${HAVE_SNMP}" = "yes"; then
-    for ac_snmp in /usr/include/net-snmp/library/asn1.h /usr/include/ucd-snmp/asn1.h /usr/local/include/ucd-snmp/asn1.h /dev/null
-    do
-      test -f "${ac_snmp}" && break
+if test "${enable_snmp}" = "yes"; then
+    LIBS="${LIBS} -lcrypto"
+    AC_CHECK_LIB(netsnmp, asn_parse_int,
+    	[AC_DEFINE(HAVE_NETSNMP,,Net SNMP) 
+    	 AC_DEFINE(HAVE_SNMP,,SNMP)
+    	 LIBS="${LIBS} -lnetsnmp"],
+    	[AC_MSG_ERROR([--enable-snmp given, but cannot find support for SNMP])])
+    
+    for ac_snmp in /usr/include \
+    		/usr/local/include \
+    		/dev/null; do
+    	test -f "${ac_snmp}/net-snmp/library/asn1.h" && break
     done
-
+    
     case ${ac_snmp} in
-      /usr/include/net-snmp/*)
-                  AC_DEFINE(HAVE_SNMP,,SNMP)
-		  AC_DEFINE(HAVE_NETSNMP,,SNMP)
-                  AC_DEFINE(UCD_COMPATIBLE,,SNMP)
-                  SNMP_INCLUDES="${SNMP_INCLUDES} -I/usr/include/net-snmp -I/usr/include/net-snmp/library"
-		  if test "${HAVE_NETSNMP}" = "yes"; then
-		        LIBS="${LIBS} -lnetsnmp"
-		  else
-			LIBS="${LIBS} -lsnmp"
-		  fi
-                  ;;
-      /usr/include/ucd-snmp/*) 
-                  AC_DEFINE(HAVE_SNMP,,SNMP)
-                  SNMP_INCLUDES="${SNMP_INCLUDES} -I/usr/include/ucd-snmp"
-    		  LIBS="${LIBS} -lsnmp"
-                  ;;
-      /usr/local/include/ucd-snmp/*) 
-                  AC_DEFINE(HAVE_SNMP,,SNMP)
-  	          SNMP_INCLUDES="${SNMP_INCLUDES} -I/usr/local/include/ucd-snmp"
-  		  LIBS="${LIBS} -L/usr/local/lib -lsnmp"
-                  ;;
-      /usr/local/include/net-snmp/*)
-      		AC_DEFINE(HAVE_SNMP,,SNMP)
-      		AC_DEFINE(HAVE_NET_SNMP,,SNMP)
-      		AC_DEFINE(UCD_COMPATIBLE,,SNMP)
-      		SNMP_INCLUDES="${SNMP_INCLUDES} -I/usr/local/include/net-snmp"
-      		LIBS="${LIBS} -L/usr/local/lib -lnetsnmp"
-      		;;
+    	/dev/null)
+    		AC_MSG_ERROR([--enable-snmp given, but can not find header])
+    		;;
+    	*)
+    		SNMP_INCLUDES="-I${ac_snmp}/net-snmp"
+    		SNMP_INCLUDES="${SNMP_INCLUDES} -I${ac_snmp}/net-snmp/library"
+    		;;
     esac
-    if test "${NEED_CRYPTO}" = "yes"; then
-      LIBS="${LIBS} -lcrypto"
-    fi
-  fi
+    
+    AC_SUBST(SNMP_INCLUDES)
 fi
-
-if test "${enable_snmp}" = "yes" -a "${HAVE_SNMP}" != "yes"; then
-  AC_MSG_ERROR([--enable-snmp given, but cannot find support for SNMP])
-fi
-
-AC_SUBST(SNMP_INCLUDES)
 
 dnl ----------------------------
 dnl check sa_len of sockaddr

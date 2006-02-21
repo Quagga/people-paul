@@ -2606,9 +2606,9 @@ DEFUN (show_ip_ospf,
            VTY_NEWLINE);
   
   /* Graceful shutdown */
-  if (ospf->t_graceful_shutdown)
-    vty_out (vty, " Graceful shutdown in progress, %s remaining%s",
-             ospf_timer_dump (ospf->t_graceful_shutdown,
+  if (ospf->t_deferred_shutdown)
+    vty_out (vty, " Deferred shutdown in progress, %s remaining%s",
+             ospf_timer_dump (ospf->t_deferred_shutdown,
                               timebuf, sizeof (timebuf)), VTY_NEWLINE);
   /* Show capability. */
   vty_out (vty, " Supports only single TOS (TOS0) routes%s", VTY_NEWLINE);
@@ -3870,7 +3870,7 @@ show_ip_ospf_database_summary (struct vty *vty, struct ospf *ospf, int self)
 #ifdef HAVE_OPAQUE_LSA
           case OSPF_OPAQUE_AS_LSA:
 #endif /* HAVE_OPAQUE_LSA */
-            break;;
+            break;
           default:
             continue;
         }
@@ -7693,10 +7693,9 @@ config_write_ospf_distribute (struct vty *vty, struct ospf *ospf)
       /* default-information print. */
       if (ospf->default_originate != DEFAULT_ORIGINATE_NONE)
 	{
-	  if (ospf->default_originate == DEFAULT_ORIGINATE_ZEBRA)
-	    vty_out (vty, " default-information originate");
-	  else
-	    vty_out (vty, " default-information originate always");
+	  vty_out (vty, " default-information originate");
+	  if (ospf->default_originate == DEFAULT_ORIGINATE_ALWAYS)
+	    vty_out (vty, " always");
 
 	  if (ospf->dmetric[DEFAULT_ROUTE].value >= 0)
 	    vty_out (vty, " metric %d",

@@ -78,6 +78,9 @@ struct assegment_header
 
 /* Hash for aspath.  This is the top level structure of AS path. */
 struct hash *ashash;
+
+/* Stream for SNMP. See aspath_snmp_pathseg */
+static struct stream *snmp_stream;
 
 static inline as_t *
 assegment_data_new (int num)
@@ -209,11 +212,14 @@ assegment_prepend_asns (struct assegment *seg, as_t asnum, int num)
 static struct assegment *
 assegment_append_asns (struct assegment *seg, as_t *asnos, int num)
 {
-  seg->as = XREALLOC (MTYPE_AS_SEG_DATA, seg->as,
+  as_t *newas;
+  
+  newas = XREALLOC (MTYPE_AS_SEG_DATA, seg->as,
 		      ASSEGMENT_DATA_SIZE (seg->length + num));
 
-  if (seg->as)
+  if (newas)
     {
+      seg->as = newas;
       memcpy (seg->as + seg->length, asnos, ASSEGMENT_DATA_SIZE(num));
       seg->length += num;
       return seg;
@@ -582,9 +588,6 @@ aspath_hash_alloc (void *arg)
   /* New aspath strucutre is needed. */
   aspath = aspath_dup (arg);
   
-  /* Make AS path string. */
-  aspath->str = aspath_make_str_count (aspath);
-
   /* Malformed AS path value. */
   if (! aspath->str)
     {
@@ -670,6 +673,12 @@ aspath_parse (struct stream *s, size_t length)
   
   /* If already same aspath exist then return it. */
   find = hash_get (ashash, &as, aspath_hash_alloc);
+  
+  /* aspath_hash_alloc dupes segments too. that probably could be
+   * optimised out.
+   */
+  assegment_free_all (as.segments);
+  
   if (! find)
     return NULL;
   find->refcnt++;
@@ -763,22 +772,21 @@ u_char *
 aspath_snmp_pathseg (struct aspath *as, size_t *varlen)
 {
 #define SNMP_PATHSEG_MAX 1024
-  static struct stream *s = NULL;
-  
-  if (!s)
-    s = stream_new (SNMP_PATHSEG_MAX);
+
+  if (!snmp_stream)
+    snmp_stream = stream_new (SNMP_PATHSEG_MAX);
   else
-    stream_reset (s);
+    stream_reset (snmp_stream);
   
   if (!as)
     {
       *varlen = 0;
       return NULL;
     }
-  aspath_put (s, as);
+  aspath_put (snmp_stream, as);
   
-  *varlen = stream_get_endp (s);
-  return stream_pnt(s);
+  *varlen = stream_get_endp (snmp_stream);
+  return stream_pnt(snmp_stream);
 }
       
 #define min(A,B) ((A) < (B) ? (A) : (B))
@@ -1301,37 +1309,30 @@ aspath_gettoken (const char *buf, enum as_token *token, u_short *asno)
     {
     case '\0':
       return NULL;
-      break;
     case '{':
       *token = as_token_set_start;
       p++;
       return p;
-      break;
     case '}':
       *token = as_token_set_end;
       p++;
       return p;
-      break;
     case '(':
       *token = as_token_confed_seq_start;
       p++;
       return p;
-      break;
     case ')':
       *token = as_token_confed_seq_end;
       p++;
       return p;
-      break;
     case '[':
       *token = as_token_confed_set_start;
       p++;
       return p;
-      break;
     case ']':
       *token = as_token_confed_set_end;
       p++;
       return p;
-      break;
     }
 
   /* Check actual AS value. */
@@ -1360,9 +1361,9 @@ aspath_gettoken (const char *buf, enum as_token *token, u_short *asno)
 struct aspath *
 aspath_str2aspath (const char *str)
 {
-  enum as_token token;
+  enum as_token token = as_token_unknown;
   u_short as_type;
-  u_short asno;
+  u_short asno = NULL;
   struct aspath *aspath;
   int needtype;
 
@@ -1415,7 +1416,6 @@ aspath_str2aspath (const char *str)
 	default:
 	  aspath_free (aspath);
 	  return NULL;
-	  break;
 	}
     }
 
@@ -1481,6 +1481,15 @@ void
 aspath_init (void)
 {
   ashash = hash_create_size (32767, aspath_key_make, aspath_cmp);
+}
+
+void
+aspath_finish (void)
+{
+  hash_free (ashash);
+  
+  if (snmp_stream)
+    stream_free (snmp_stream);
 }
 
 /* return and as path value */

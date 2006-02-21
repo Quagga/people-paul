@@ -1,3 +1,142 @@
+2006-02-02 Paul Jakma <paul.jakma@sun.com>
+
+	* interface.c: (if_dump_vty) move flags to their line, neater.
+
+2006-01-30 Paul Jakma <paul.jakma@sun.com>
+
+	* zebra_rib.c: (rib_process) Fourth time lucky on this jinxed
+	  commit, last commit had a hole that could allow connected
+	  route selection to escape beyond the connected route logic. 
+	  This time I cross-checked with Gunnar first. ;)
+
+2006-01-25 Gunnar Stigen <gunnar.stigen@axxessit.no>
+
+	* zebra_rib.c: (rib_process) Application of Gunnar's earlier
+	  metric selection RIB change included incorrect tidy-ups made
+	  by commiter. Fix. (NB: any errors here are again due to paul).
+
+2006-01-25 Paul Jakma <paul.jakma@sun.com>
+
+	* (general) More solaris PF_ROUTE hacks. The IFF_UP mangling
+	  for solaris was incomplete on the PF_ROUTE side. fix it.
+	  This changeset generally uglifies things. For some future
+	  work I'd like to see the state changes seperated out from
+	  the details of the code. Differences between systems might
+	  then be slightly easier to implement without convoluted
+	  hacks.
+	  Changes should be specific to Solaris mostly, however
+	  also tested on FreeBSD 6.
+	* if_ioctl_solaris.c: (interface_list_ioctl) ignore ~IFF_UP
+	  interfaces, we'll hear about them when/if interface goes up
+	  through NEWADDR.
+	  Update flags explicitely at end of it to kick mangling.
+	* ioctl_solaris.c: (if_mangle_up) removed to interface.c, in
+	  kind.
+	  (lifreq_set_name) more convenient to take the string, than
+	  the ifp.
+	  (if_get_flags_direct) new convenience function, returns
+	  the actual flags. Used during bootstrap in if_ioctl_solaris.c
+	  to peek at flags of logical interfaces to see whether or
+	  not to ignore them.
+	  (if_get_flags) ENXIO means it's gone, poke out IFF_UP and
+	  kick flags update.
+	  (if_{un,}set_flags) flags argument should be 64bit.
+	* ioctl.{c,h}: flags argument should be 64bit. 
+	* interface.h: Add a 'primary_state' flag to struct zebra_if on
+	  SUNOS_5.
+	  Export if_flags_update.
+	* interface.c: (if_flags_mangle) moved over in kind from
+	  ioctl_solaris.c. Nasty kludge to try get IFF_UP right, as
+	  much as is possible. Also keep track of the actual IFF_UP
+	  value for the primary interface, so we can know when the ifp
+	  must be deleted.
+	  (if_flags_update) Take a new interface flags value, apply it
+	  to the interface, and take whatever actions are required due
+	  to flag transitions.
+	  (if_refresh) flag state change logic is moved out to
+	  previous. Just call if_get_flags, which will end up using
+	  previous to effect the update of flags.
+	  (if_flag_dump_vty) IFF_IPV{4,6} aren't interesting, VIRTUAL
+	  and NOXMIT are though.
+	* kernel_socket.c: (ifm_read) Down->Down transitions shouldn't
+	  create ifp, for non-IFANNOUNCE systems.
+	  Use if_flags_update to update flags.
+	  flag transition logic is now handled automatically through
+	  if_flags_update.
+	  (ifam_read) Better to call if_refresh *after* adding
+ 	  connected addresses, as connected count affects IFF_UP on
+ 	  IFF_UP-mangled systems.
+ 	  On Solaris, Up->Down due to DELADDR means we need to delete
+	  the ifp - the IFINFO might already have been and gone.
+	* rt.h: include other dependent headers.
+
+2006-01-19 Paul Jakma <paul.jakma@sun.com>
+
+        * (general) various miscellaneous compiler warning fixes.
+          Remove redundant break statements from switch clauses
+          which return.
+          Remove stray semi-colons which cause empty-statement
+          warnings.
+	* main.c: (sighup) remove private declaration of external
+          function.
+          (main) return from main, not exit, cause it annoys SOS.
+
+2006-01-18 Gunnar Stigen <gunnar.stigen@axxessit.no>
+
+	* zebra_rib.c: Take interface metric into account.
+
+2006-01-17 Paul Jakma <paul.jakma@sun.com>
+
+	* kernel_socket.c: (ifam_read) Read metric from RTM_NEWADDR.
+	  If interface is an alias, pass the alias as a label for
+	  connected_add_ipv{4,6}.
+	* rt_netlink.c: (netlink_interface_addr) print out
+	  IFA_CACHEINFO info, if present, when debugging kernel
+	  messages.
+
+2006-01-17 Gunnar Stigen <gunnar.stigen@axxessit.no>
+
+	* connected.c: (connected_up_ipv{4,6}) Include interface metric on
+	  connected routes.
+	* if_ioctl.c: (if_getaddrs) Be defensive about assuming
+	  that struct ifaddrs will have ifa_addr filled in.
+
+2006-01-16 Paul Jakma <paul.jakma@sun.com>
+
+	* zserv.c: Read/write updated Zserv header.
+
+2006-01-11 Paul Jakma <paul.jakma@sun.com>
+
+	* zserv.c: (zsend_interface_{add,delete,update}) if flags are
+	  8 bytes now, update to write out with stream_putq.
+
+2005-12-29  Greg Troxel  <gdt@fnord.ir.bbn.com>
+
+	* kernel_socket.c: remove dead code (from David Young).
+
+	* rt_socket.c (kernel_rtm_ipv4): Use AF_INET rather than AF_UNSPEC
+	for mask.  From David Young.
+
+2005-11-26 Paul Jakma <paul.jakma@sun.com>
+
+	* connected.{c,h}: (connected_add_ipv6) label should have
+	  const qualifier, fix declarations.
+
+2005-11-24 Paul Jakma <paul.jakma@sun.com>
+
+	* kernel_socket.h: New header for functions exported to sysctl
+	  methods.
+	* kernel_socket.c: include previous.
+	  Remove static qualifier from couple of functions which are
+	  used by sysctl methods.
+	  Add a workaround for a bogus gcc warning to the RTA_ macros.
+	* Makefile.am: Add kernel_socket.h to noinst_HEADERS
+	* if_sysctl.c: include rt.h and kernel_socket.h and remove
+	  redundant prototypes.
+	* rtread_sysctl.c: ditto.
+	  (route_read) fix mismatch of return values.
+	* {rt,zserv,rib}.h: Include lib headers depended on.
+
 2005-11-23 Paul Jakma <paul.jakma@sun.com>
 
 	* (general) fix some small compile errors, and mark several

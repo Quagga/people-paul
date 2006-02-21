@@ -919,9 +919,46 @@ rib_process (struct work_queue *wq, void *data)
       if (rib->distance == DISTANCE_INFINITY)
         continue;
 
-      /* Newly selected rib. */
-      if (! select || rib->distance < select->distance 
-          || rib->type == ZEBRA_ROUTE_CONNECT)
+      /* Newly selected rib, the common case. */
+      if (!select)
+        {
+          select = rib;
+          continue;
+        }
+      
+      /* filter route selection in following order:
+       * - connected beats other types
+       * - lower distance beats higher
+       * - lower metric beats higher for equal distance
+       * - last, hence oldest, route wins tie break.
+       */
+      
+      /* Connected routes. Pick the last connected
+       * route of the set of lowest metric connected routes.
+       */
+      if (rib->type == ZEBRA_ROUTE_CONNECT)
+        {
+          if (select->type != ZEBRA_ROUTE_CONNECT
+              || rib->metric <= select->metric)
+            select = rib;
+          continue;
+        }
+      else if (select->type == ZEBRA_ROUTE_CONNECT)
+        continue;
+      
+      /* higher distance loses */
+      if (rib->distance > select->distance)
+        continue;
+      
+      /* lower wins */
+      if (rib->distance < select->distance)
+        {
+          select = rib;
+          continue;
+        }
+      
+      /* metric tie-breaks equal distance */
+      if (rib->metric <= select->metric)
         select = rib;
     }
   
@@ -1484,7 +1521,7 @@ static_ipv4_nexthop_same (struct nexthop *nexthop, struct static_ipv4 *si)
   if (nexthop->type == NEXTHOP_TYPE_BLACKHOLE
       && si->type == STATIC_IPV4_BLACKHOLE)
     return 1;
-  return 0;;
+  return 0;
 }
 
 /* Uninstall static route from RIB. */
@@ -2032,7 +2069,7 @@ static_ipv6_nexthop_same (struct nexthop *nexthop, struct static_ipv6 *si)
       && IPV6_ADDR_SAME (&nexthop->gate.ipv6, &si->ipv6)
       && strcmp (nexthop->ifname, si->ifname) == 0)
     return 1;
-  return 0;;
+  return 0;
 }
 
 static void

@@ -339,7 +339,11 @@ ospf_make_md5_digest (struct ospf_interface *oi, struct ospf_packet *op)
   /* We do this here so when we dup a packet, we don't have to
      waste CPU rewriting other headers. */
   t = (time(NULL) & 0xFFFFFFFF);
-  oi->crypt_seqnum = ( t > oi->crypt_seqnum ? t : oi->crypt_seqnum++);
+  if (t > oi->crypt_seqnum)
+    oi->crypt_seqnum = t;
+  else
+    oi->crypt_seqnum++;
+  
   ospfh->u.crypt.crypt_seqnum = htonl (oi->crypt_seqnum); 
 
   /* Get MD5 Authentication key from auth_key list. */
@@ -2249,8 +2253,8 @@ ospf_verify_header (struct stream *ibuf, struct ospf_interface *oi,
   /* Check authentication. */
   if (ospf_auth_type (oi) != ntohs (ospfh->auth_type))
     {
-      zlog_warn ("interface %s: ospf_read authentication type mismatch.",
-		 IF_NAME (oi));
+      zlog_warn ("interface %s: auth-type mismatch, local %d, rcvd %d",
+		 IF_NAME (oi), ospf_auth_type (oi), ntohs (ospfh->auth_type));
       return -1;
     }
 

@@ -1,3 +1,73 @@
+2006-01-19 Paul Jakma <paul.jakma@sun.com>
+
+        * (general) various miscellaneous compiler warning fixes.
+           Remove redundant break statements from switch clauses
+           which return.
+           return from main, not exit, cause it annoys SOS.
+           Remove stray semi-colons which cause empty-statement
+           warnings.
+
+2006-01-18 Juergen Kammer <j.kammer@eurodata.de>
+
+	* ospf_lsa.c: (ospf_router_lsa_new) dont take reference to the
+	  stream data until it is constructed, data reference is
+	  volatile due to the potential resize in link_info_set
+
+2006-01-18 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_lsa.c: (link_info_set) Resize the stream if required and
+	  possible. Return number of links added.
+	  (lsa_link_*_set) use return value from previous.
+	* ospf_lsa.h: Add OSPF_ROUTER_LSA_LINK_SIZE define.
+	  
+2006-01-17 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_packet.c: (ospf_verify_header) print out the types
+	  involved if there's a mismatch.
+	* ospf_zebra.c: (ospf_zebra_add) Adjust to new zserv format.
+
+2006-01-10 Len Sorensen <lennartsorensen@ruggedcom.com>
+
+	* (general) Bug #234, see also [quagga-dev 3902].
+	  Fix problem with nbr_self not being properly reinitialised
+	  when an interface comes up, after having been down.
+	  Some re-arrangement done by Paul Jakma, any bugs introduced
+	  on top of Len's suggested changes are his.
+	* ospf_neighbor.c: (ospf_nbr_add_self) centralise
+	  initialisation of nbr_self parameters here.
+	* ospf_interface.c: (ospf_if_new) deleting initialisation of
+	  parameters of nbr_self, just rely on call to
+	  ospf_nbr_add_self.
+	  (ospf_if_cleanup) ditto.
+	* ospfd.c: (ospf_network_run) ditto.
+
+2006-01-10 Juris Kalnins <juris@mt.lv>
+
+	* ospf_zebra.c: (ospf_interface_address_delete) fix rare leak of 
+	  struct connected in an error case.
+	* ospf_packet.c: (ospf_make_md5_digest) fix odd, if not
+	  undefined effect, assignment of an increment expression.
+
+2006-01-10 Paul Jakma <paul.jakma@sun.com>
+
+	* ospfd.c: (ospf_network_run) checking to see if router-id
+	  is set should be on ospf->router_id, not router_id_static.
+	  This was causing ospfd to not start if router-id had not
+	  been configured statically.
+	  (ospf_if_update) ditto.
+	* ospf_vty.c: (config_write_ospf_distribute) trim down
+	  redundant strings.
+
+2005-11-26 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_api.c: (struct opaque_lsa) change from gcc zero-length
+	  array to C99 incomplete type array.
+	* (general) s/graceful/deferred/ in all files, the former term 
+	   is confusing wrt OSPF Graceful-Restart.
+	* ospfd.c: (ospf_deferred_shutdown_check) dont return
+	  a function which returns void. SOS complains about this.
+	  (ospf_finish)
+
 2005-11-20 Paul Jakma <paul.jakma@sun.com>
 
         * ospfd.h: remove the OSPF_ROUTER_ID_UPDATE_DELAY define

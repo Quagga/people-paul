@@ -1,6 +1,6 @@
 /* $USAGI: md5.c,v 1.2 2000/11/02 11:59:24 yoshfuji Exp $ */
 /*	$KAME: md5.c,v 1.2 2000/05/27 07:07:48 jinmei Exp $	*/
-/*	$Id: md5.c,v 1.4 2005/11/03 09:00:23 paul Exp $ */
+/*	$Id: md5.c,v 1.6 2006/01/17 23:39:04 vincent Exp $ */
 
 /*
  * Copyright (C) 2004 6WIND
@@ -146,9 +146,10 @@ void md5_init(md5_ctxt *ctxt)
 	memset (ctxt->md5_buf, 0, sizeof(ctxt->md5_buf));
 }
 
-void md5_loop(md5_ctxt *ctxt, const uint8_t *input, uint len)
+void md5_loop(md5_ctxt *ctxt, const void *vinput, uint len)
 {
 	uint gap, i;
+	const uint8_t *input = vinput;
 
 	ctxt->md5_n += len * 8; /* byte to bit */
 	gap = MD5_BUFLEN - ctxt->md5_i;

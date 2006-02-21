@@ -289,7 +289,10 @@ ospf_interface_address_delete (int command, struct zclient *zclient,
 
   rn = route_node_lookup (IF_OIFS (ifp), &p);
   if (!rn)
-    return 0;
+    {
+      connected_free (c);
+      return 0;
+    }
 
   assert (rn->info);
   oi = rn->info;
@@ -339,11 +342,8 @@ ospf_zebra_add (struct prefix_ipv4 *p, struct ospf_route *or)
       s = zclient->obuf;
       stream_reset (s);
 
-      /* Length place holder. */
-      stream_putw (s, 0);
-
       /* Put command, type, flags, message. */
-      stream_putc (s, ZEBRA_IPV4_ROUTE_ADD);
+      zclient_create_header (s, ZEBRA_IPV4_ROUTE_ADD);
       stream_putc (s, ZEBRA_ROUTE_OSPF);
       stream_putc (s, flags);
       stream_putc (s, message);

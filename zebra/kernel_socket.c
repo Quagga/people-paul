@@ -36,6 +36,7 @@
 #include "zebra/interface.h"
 #include "zebra/zserv.h"
 #include "zebra/debug.h"
+#include "zebra/kernel_socket.h"
 
 extern struct zebra_privs_t zserv_privs;
 extern struct zebra_t zebrad;
@@ -77,27 +78,35 @@ extern struct zebra_t zebrad;
            ROUNDUP(sizeof(struct sockaddr_dl)) : sizeof(struct sockaddr)))
 #endif /* HAVE_SA_LEN */
 
+/* We use an additional pointer in following, pdest, rather than (DEST)
+ * directly, because gcc will warn if the macro is expanded and DEST is NULL,
+ * complaining that memcpy is being passed a NULL value, despite the fact
+ * the if (NULL) makes it impossible.
+ */
 #define RTA_ADDR_GET(DEST, RTA, RTMADDRS, PNT) \
   if ((RTMADDRS) & (RTA)) \
     { \
+      void *pdest = (DEST); \
       int len = SAROUNDUP ((PNT)); \
       if ( ((DEST) != NULL) && \
            af_check (((struct sockaddr *)(PNT))->sa_family)) \
-        memcpy ((DEST), (PNT), len); \
+        memcpy (pdest, (PNT), len); \
       (PNT) += len; \
     }
 #define RTA_ATTR_GET(DEST, RTA, RTMADDRS, PNT) \
   if ((RTMADDRS) & (RTA)) \
     { \
+      void *pdest = (DEST); \
       int len = SAROUNDUP ((PNT)); \
-      if ( ((DEST) != NULL) ) \
-        memcpy ((DEST), (PNT), len); \
+      if ((DEST) != NULL) \
+        memcpy (pdest, (PNT), len); \
       (PNT) += len; \
     }
 
 #define RTA_NAME_GET(DEST, RTA, RTMADDRS, PNT, LEN) \
   if ((RTMADDRS) & (RTA)) \
     { \
+      u_char *pdest = (u_char *) (DEST); \
       int len = SAROUNDUP ((PNT)); \
       struct sockaddr_dl *sdl = (struct sockaddr_dl *)(PNT); \
       if (IS_ZEBRA_DEBUG_KERNEL) \
@@ -106,8 +115,8 @@ extern struct zebra_t zebrad;
       if ( ((DEST) != NULL) && (sdl->sdl_family == AF_LINK) \
            && (sdl->sdl_nlen < IFNAMSIZ) && (sdl->sdl_nlen <= len) ) \
         { \
-          memcpy ((DEST), sdl->sdl_data, sdl->sdl_nlen); \
-          (DEST)[sdl->sdl_nlen] = '\0'; \
+          memcpy (pdest, sdl->sdl_data, sdl->sdl_nlen); \
+          pdest[sdl->sdl_nlen] = '\0'; \
           (LEN) = sdl->sdl_nlen; \
         } \
       (PNT) += len; \
@@ -251,8 +260,9 @@ ifan_read (struct if_announcemsghdr *ifan)
     assert ( (ifp->ifindex == ifan->ifan_index) 
              || (ifp->ifindex == IFINDEX_INTERNAL) );
 
-  if ( (ifp == NULL) || (ifp->ifindex == IFINDEX_INTERNAL)
-      && (ifan->ifan_what == IFAN_ARRIVAL) )
+  if ( (ifp == NULL) 
+      || ((ifp->ifindex == IFINDEX_INTERNAL)
+          && (ifan->ifan_what == IFAN_ARRIVAL)) )
     {
       if (IS_ZEBRA_DEBUG_KERNEL)
         zlog_debug ("%s: creating interface for ifindex %d, name %s",
@@ -286,7 +296,7 @@ ifan_read (struct if_announcemsghdr *ifan)
  * sysctl (from interface_list).  There may or may not be sockaddrs
  * present after the header.
  */
-static int
+int
 ifm_read (struct if_msghdr *ifm)
 {
   struct interface *ifp = NULL;
@@ -386,6 +396,14 @@ ifm_read (struct if_msghdr *ifm)
 		     ifm->ifm_index);
 	  return -1;
 	}
+
+#ifndef RTM_IFANNOUNCE
+      /* Down->Down interface should be ignored here.
+       * See further comment below.
+       */
+      if (!CHECK_FLAG (ifm->ifm_flags, IFF_UP))
+        return 0;
+#endif /* !RTM_IFANNOUNCE */
       
       if (ifp == NULL)
         {
@@ -404,7 +422,7 @@ ifm_read (struct if_msghdr *ifm)
        * structure with ifindex IFINDEX_INTERNAL.
        */
       ifp->ifindex = ifm->ifm_index;
-      ifp->flags = ifm->ifm_flags;
+      if_flags_update (ifp, ifm->ifm_flags);
 #if defined(__bsdi__)
       if_kvm_get_mtu (ifp);
 #else
@@ -431,34 +449,26 @@ ifm_read (struct if_msghdr *ifm)
           return -1;
         }
       
-      if (if_is_up (ifp))
-	{
-	  ifp->flags = ifm->ifm_flags;
-	  if (! if_is_up (ifp))
-	    {
-	      if_down (ifp);
+      /* update flags and handle operative->inoperative transition, if any */
+      if_flags_update (ifp, ifm->ifm_flags);
+      
 #ifndef RTM_IFANNOUNCE
-              /* No RTM_IFANNOUNCE on this platform, so we can never
-               * distinguish between down and delete. We must presume
-               * it has been deleted.
-               * Eg, Solaris will not notify us of unplumb.
-               *
-               * XXX: Fixme - this should be runtime detected
-               * So that a binary compiled on a system with IFANNOUNCE
-               * will still behave correctly if run on a platform without
-               */
-              if_delete_update (ifp);
+      if (!if_is_up (ifp))
+          {
+            /* No RTM_IFANNOUNCE on this platform, so we can never
+             * distinguish between ~IFF_UP and delete. We must presume
+             * it has been deleted.
+             * Eg, Solaris will not notify us of unplumb.
+             *
+             * XXX: Fixme - this should be runtime detected
+             * So that a binary compiled on a system with IFANNOUNCE
+             * will still behave correctly if run on a platform without
+             */
+            if_delete_update (ifp);
+          }
 #endif /* RTM_IFANNOUNCE */
-            }
-	}
-      else
-	{
-	  ifp->flags = ifm->ifm_flags;
-	  if (if_is_up (ifp))
-	    if_up (ifp);
-	}
     }
-  
+
 #ifdef HAVE_NET_RT_IFLIST
   ifp->stats = ifm->ifm_data;
 #endif /* HAVE_NET_RT_IFLIST */
@@ -510,7 +520,7 @@ ifam_read_mesg (struct ifa_msghdr *ifm,
 }
 
 /* Interface's address information get. */
-static int
+int
 ifam_read (struct ifa_msghdr *ifam)
 {
   struct interface *ifp = NULL;
@@ -534,9 +544,8 @@ ifam_read (struct ifa_msghdr *ifam)
   if (ifnlen && strncmp (ifp->name, ifname, INTERFACE_NAMSIZ))
     isalias = 1;
   
-  /* Check interface flag for implicit up of the interface. */
-  if_refresh (ifp);
-
+  ifp->metric = ifam->ifam_metric;
+  
   /* Add connected address. */
   switch (sockunion_family (&addr))
     {
@@ -544,7 +553,8 @@ ifam_read (struct ifa_msghdr *ifam)
       if (ifam->ifam_type == RTM_NEWADDR)
 	connected_add_ipv4 (ifp, 0, &addr.sin.sin_addr, 
 			    ip_masklen (mask.sin.sin_addr),
-			    &brd.sin.sin_addr, NULL);
+			    &brd.sin.sin_addr,
+			    (isalias ? ifname : NULL));
       else
 	connected_delete_ipv4 (ifp, 0, &addr.sin.sin_addr, 
 			       ip_masklen (mask.sin.sin_addr),
@@ -561,7 +571,8 @@ ifam_read (struct ifa_msghdr *ifam)
 	connected_add_ipv6 (ifp,
 			    &addr.sin6.sin6_addr, 
 			    ip6_masklen (mask.sin6.sin6_addr),
-			    &brd.sin6.sin6_addr, NULL);
+			    &brd.sin6.sin6_addr,
+			    (isalias ? ifname : NULL));
       else
 	connected_delete_ipv6 (ifp,
 			       &addr.sin6.sin6_addr, 
@@ -573,6 +584,27 @@ ifam_read (struct ifa_msghdr *ifam)
       /* Unsupported family silently ignore... */
       break;
     }
+  
+  /* Check interface flag for implicit up of the interface. */
+  if_refresh (ifp);
+
+#ifdef SUNOS_5
+  /* In addition to lacking IFANNOUNCE, on SUNOS IFF_UP is strange. 
+   * See comments for SUNOS_5 in interface.c::if_flags_mangle.
+   * 
+   * Here we take care of case where the real IFF_UP was previously
+   * unset (as kept in struct zebra_if.primary_state) and the mangled
+   * IFF_UP (ie IFF_UP set || listcount(connected) has now transitioned
+   * to unset due to the lost non-primary address having DELADDR'd.
+   *
+   * we must delete the interface, because in between here and next
+   * event for this interface-name the administrator could unplumb
+   * and replumb the interface.
+   */
+  if (!if_is_up (ifp))
+    if_delete_update (ifp);
+#endif /* SUNOS_5 */
+  
   return 0;
 }
 
@@ -624,7 +656,7 @@ rtm_read_mesg (struct rt_msghdr *rtm,
   return rtm->rtm_flags;
 }
 
-static void
+void
 rtm_read (struct rt_msghdr *rtm)
 {
   int flags;
@@ -756,10 +788,6 @@ rtm_write (int message,
   int ret;
   caddr_t pnt;
   struct interface *ifp;
-  struct sockaddr_in tmp_gate;
-#ifdef HAVE_IPV6
-  struct sockaddr_in6 tmp_gate6;
-#endif /* HAVE_IPV6 */
 
   /* Sequencial number of routing message. */
   static int msg_seq = 0;
@@ -771,20 +799,6 @@ rtm_write (int message,
     char buf[512];
   } msg;
   
-  memset (&tmp_gate, 0, sizeof (struct sockaddr_in));
-  tmp_gate.sin_family = AF_INET;
-#ifdef HAVE_SIN_LEN
-  tmp_gate.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_SIN_LEN */
-
-#ifdef HAVE_IPV6
-  memset (&tmp_gate6, 0, sizeof (struct sockaddr_in6));
-  tmp_gate6.sin6_family = AF_INET6;
-#ifdef SIN6_LEN
-  tmp_gate6.sin6_len = sizeof (struct sockaddr_in6);
-#endif /* SIN6_LEN */
-#endif /* HAVE_IPV6 */
-
   if (routing_sock < 0)
     return ZEBRA_ERR_EPERM;
 

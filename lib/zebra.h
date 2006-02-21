@@ -397,6 +397,12 @@ struct in_pktinfo
 #define ZEBRA_ROUTER_ID_UPDATE            22
 #define ZEBRA_MESSAGE_MAX                 23
 
+/* Marker value used in new Zserv, in the byte location corresponding
+ * the command value in the old zserv header. To allow old and new
+ * Zserv headers to be distinguished from each other.
+ */
+#define ZEBRA_HEADER_MARKER              255
+
 /* Zebra route's types. */
 #define ZEBRA_ROUTE_SYSTEM               0
 #define ZEBRA_ROUTE_KERNEL               1
@@ -415,9 +421,9 @@ struct in_pktinfo
    the route_types[] table in lib/log.c must be updated! */
 
 /* Map a route type to a string.  For example, ZEBRA_ROUTE_RIPNG -> "ripng". */
-extern const char *zebra_route_string(u_int route_type);
+extern const char *zebra_route_string(unsigned int route_type);
 /* Map a route type to a char.  For example, ZEBRA_ROUTE_RIPNG -> 'R'. */
-extern char zebra_route_char(u_int route_type);
+extern char zebra_route_char(unsigned int route_type);
 
 /* Zebra's family types. */
 #define ZEBRA_FAMILY_IPV4                1
@@ -493,9 +499,9 @@ extern char zebra_route_char(u_int route_type);
 typedef u_int16_t afi_t;
 typedef u_int8_t safi_t;
 
-/* Zebra types. */
+/* Zebra types. Used in Zserv message header. */
 typedef u_int16_t zebra_size_t;
-typedef u_int8_t zebra_command_t;
+typedef u_int16_t zebra_command_t;
 
 /* FIFO -- first in first out structure and macros.  */
 struct fifo

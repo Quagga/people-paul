@@ -1195,7 +1195,7 @@ route_set_community (void *rule, struct prefix *prefix,
   struct community *new = NULL;
   struct community *old;
   struct community *merge;
-
+  
   if (type == RMAP_BGP)
     {
       rcs = rule;
@@ -1215,12 +1215,20 @@ route_set_community (void *rule, struct prefix *prefix,
       if (rcs->additive && old)
 	{
 	  merge = community_merge (community_dup (old), rcs->com);
+	  
+	  /* HACK: if the old community is not intern'd, 
+           * we should free it here, or all reference to it may be lost.
+           * Really need to cleanup attribute caching sometime.
+           */
+	  if (old->refcnt == 0)
+	    community_free (old);
 	  new = community_uniq_sort (merge);
 	  community_free (merge);
 	}
       else
 	new = community_dup (rcs->com);
-
+      
+      /* will be interned by caller if required */
       attr->community = new;
 
       attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_COMMUNITIES);
@@ -2046,11 +2054,9 @@ bgp_route_match_add (struct vty *vty, struct route_map_index *index,
 	case RMAP_RULE_MISSING:
 	  vty_out (vty, "%% Can't find rule.%s", VTY_NEWLINE);
 	  return CMD_WARNING;
-	  break;
 	case RMAP_COMPILE_ERROR:
 	  vty_out (vty, "%% Argument is malformed.%s", VTY_NEWLINE);
 	  return CMD_WARNING;
-	  break;
 	}
     }
   return CMD_SUCCESS;
@@ -2071,11 +2077,9 @@ bgp_route_match_delete (struct vty *vty, struct route_map_index *index,
 	case RMAP_RULE_MISSING:
 	  vty_out (vty, "%% Can't find rule.%s", VTY_NEWLINE);
 	  return CMD_WARNING;
-	  break;
 	case RMAP_COMPILE_ERROR:
 	  vty_out (vty, "%% Argument is malformed.%s", VTY_NEWLINE);
 	  return CMD_WARNING;
-	  break;
 	}
     }
   return CMD_SUCCESS;
@@ -2096,11 +2100,9 @@ bgp_route_set_add (struct vty *vty, struct route_map_index *index,
 	case RMAP_RULE_MISSING:
 	  vty_out (vty, "%% Can't find rule.%s", VTY_NEWLINE);
 	  return CMD_WARNING;
-	  break;
 	case RMAP_COMPILE_ERROR:
 	  vty_out (vty, "%% Argument is malformed.%s", VTY_NEWLINE);
 	  return CMD_WARNING;
-	  break;
 	}
     }
   return CMD_SUCCESS;
@@ -2121,11 +2123,9 @@ bgp_route_set_delete (struct vty *vty, struct route_map_index *index,
 	case RMAP_RULE_MISSING:
 	  vty_out (vty, "%% Can't find rule.%s", VTY_NEWLINE);
 	  return CMD_WARNING;
-	  break;
 	case RMAP_COMPILE_ERROR:
 	  vty_out (vty, "%% Argument is malformed.%s", VTY_NEWLINE);
 	  return CMD_WARNING;
-	  break;
 	}
     }
   return CMD_SUCCESS;
