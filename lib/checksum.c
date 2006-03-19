@@ -9,14 +9,49 @@
 #include <zebra.h>
 #include "checksum.h"
 
-int			/* return checksum in low-order 16 bits */
+void
+in_cksum_accumulate (uint32_t *sum, void *parg, int nbytes)
+{
+  uint16_t oddbyte, *ptr = parg;
+  
+  while (nbytes > 1)
+    {
+      *sum += *ptr++;
+      nbytes -= 2;
+    }
+
+  /* mop up an odd byte, if necessary */
+  if (nbytes == 1)
+    {
+      oddbyte = 0;		/* make sure top half is zero */
+      *((u_char *) & oddbyte) = *(u_char *) ptr;	/* one byte only */
+      *sum += oddbyte;
+    }
+}
+
+uint16_t
+in_cksum_finish (uint32_t sum)
+{
+  uint16_t answer;
+  /*
+   * Add back carry outs from top 16 bits to low 16 bits.
+   */
+
+  sum  = (sum >> 16) + (sum & 0xffff);	/* add high-16 to low-16 */
+  sum += (sum >> 16);			/* add carry */
+  answer = ~sum;		/* ones-complement, then truncate to 16 bits */
+  return(answer);
+}
+
+/* One pass internet checksum of contigious data */
+uint16_t 	/* return checksum */
 in_cksum(void *parg, int nbytes)
 {
-	u_short *ptr = parg;
-	register long		sum;		/* assumes long == 32 bits */
-	u_short			oddbyte;
-	register u_short	answer;		/* assumes u_short == 16 bits */
-
+	uint16_t *ptr = parg;
+	register uint32_t	sum;
+	uint16_t		oddbyte;
+	register uint16_t	answer;
+	
 	/*
 	 * Our algorithm is simple, using a 32-bit accumulator (sum),
 	 * we add sequential 16-bit words to it, and at the end, fold back

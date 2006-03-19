@@ -1,5 +1,13 @@
 2006-03-19 Paul Jakma <paul.jakma@sun.com>
 
+	* checksum.{c,h}: (in_cksum_{accumulate,finish}) Export
+	  accumulate/finish style in_cksum, allowing checksuming 
+	  across arbitrary sets of data (like md5 summing).
+	  (in_cksum) No point using an int where a uint16_t is all
+	  that's needed.
+
+2006-03-19 Paul Jakma <paul.jakma@sun.com>
+
 	* memtypes.c: Add MTYPE_BGP_SYNCHRONISE.
 
 2006-03-16 Paul Jakma <paul.jakma@sun.com>
