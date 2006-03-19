@@ -163,6 +163,7 @@ struct memory_list memory_list_rip[] =
 struct memory_list memory_list_ripng[] =
 {
   { MTYPE_RIPNG,              "RIPng structure"			},
+  { MTYPE_RIPNG_NODE,         "RIPng route node"		},
   { MTYPE_RIPNG_ROUTE,        "RIPng route info"		},
   { MTYPE_RIPNG_AGGREGATE,    "RIPng aggregate"			},
   { MTYPE_RIPNG_PEER,         "RIPng peer"			},

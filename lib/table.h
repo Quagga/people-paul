@@ -45,11 +45,8 @@ struct route_node
   /* Lock of this radix */
   unsigned int lock;
 
-  /* Each node of route. */
+  /* Protocol specific data. */
   void *info;
-
-  /* Aggregation. */
-  void *aggregate;
 };
 
 /* Prototypes. */

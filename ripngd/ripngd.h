@@ -156,6 +156,16 @@ struct ripng_packet
   struct rte rte[1];
 };
 
+/* per-route-node information, really this should be ripng_info
+ * and ripng_info should be ripng_route_info, but I didn't
+ * want to rename everything.
+ */
+struct ripng_node_info
+{
+  struct ripng_info *rinfo;
+  struct ripng_aggregate *aggregate;
+};
+
 /* Each route's information. */
 struct ripng_info
 {
@@ -195,7 +205,7 @@ struct ripng_info
   u_char metric_set;
   u_char metric_out;
   u_short tag_out;
-
+  
   struct route_node *rp;
 };
 
@@ -372,6 +382,7 @@ int ripng_offset_list_apply_out (struct prefix_ipv6 *, struct interface *, u_cha
 void ripng_offset_clean ();
 
 struct ripng_info * ripng_info_new ();
+struct ripng_node_info *ripng_node_info_new ();
 void ripng_info_free (struct ripng_info *rinfo);
 void ripng_event (enum ripng_event, int);
 int ripng_request (struct interface *ifp);

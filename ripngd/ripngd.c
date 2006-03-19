@@ -89,6 +89,12 @@ ripng_info_new ()
   return new;
 }
 
+struct ripng_node_info *
+ripng_node_info_new ()
+{
+  return XCALLOC (MTYPE_RIPNG_NODE, sizeof (struct ripng_node_info));
+}
+
 /* Free ripng information. */
 void
 ripng_info_free (struct ripng_info *rinfo)
@@ -413,7 +419,7 @@ ripng_garbage_collect (struct thread *t)
   rp = rinfo->rp;
 
   /* Unlock route_node. */
-  rp->info = NULL;
+  ((struct ripng_node_info *)rp->info)->rinfo = NULL;
   route_unlock_node (rp);
 
   /* Free RIPng routing information. */
@@ -722,9 +728,12 @@ ripng_route_process (struct rte *rte, struct sockaddr_in6 *from,
 
   /* Lookup RIPng routing table. */
   rp = route_node_get (ripng->table, (struct prefix *) &p);
-
+  
+  if (!rp->info)
+    rp->info = ripng_node_info_new();
+  
   /* Sanity check */
-  rinfo = rp->info;
+  rinfo = ((struct ripng_node_info *)rp->info)->rinfo;
   if (rinfo)
     {
       /* Redistributed route check. */
@@ -740,7 +749,7 @@ ripng_route_process (struct rte *rte, struct sockaddr_in6 *from,
 	return;
     }
 
-  if (rp->info == NULL)
+  if (rinfo == NULL)
     {
       /* Now, check to see whether there is already an explicit route
 	 for the destination prefix.  If there is no such route, add
@@ -753,7 +762,7 @@ ripng_route_process (struct rte *rte, struct sockaddr_in6 *from,
 	  
 	  /* - Setting the destination prefix and length to those in
 	     the RTE. */
-	  rp->info = rinfo;
+	  ((struct ripng_node_info *)rp->info)->rinfo = rinfo;
 	  rinfo->rp = rp;
 
 	  /* - Setting the metric to the newly calculated metric (as
@@ -793,7 +802,7 @@ ripng_route_process (struct rte *rte, struct sockaddr_in6 *from,
     }
   else
     {
-      rinfo = rp->info;
+      rinfo = ((struct ripng_node_info *)rp->info)->rinfo;
 	  
       /* If there is an existing route, compare the next hop address
 	 to the address of the router from which the datagram came.
@@ -914,6 +923,7 @@ ripng_redistribute_add (int type, int sub_type, struct prefix_ipv6 *p,
 {
   struct route_node *rp;
   struct ripng_info *rinfo;
+  struct ripng_node_info *rninfo;
 
   /* Redistribute route  */
   if (IN6_IS_ADDR_LINKLOCAL (&p->prefix))
@@ -931,7 +941,12 @@ ripng_redistribute_add (int type, int sub_type, struct prefix_ipv6 *p,
 #endif /* MUSICA or LINUX */
 
   rp = route_node_get (ripng->table, (struct prefix *) p);
-  rinfo = rp->info;
+  
+  if (!rp->info)
+    rp->info = ripng_node_info_new ();
+  
+  rninfo = rp->info;
+  rinfo = rninfo->rinfo;
 
   if (rinfo)
     {
@@ -965,7 +980,7 @@ ripng_redistribute_add (int type, int sub_type, struct prefix_ipv6 *p,
 	ripng_zebra_ipv6_delete ((struct prefix_ipv6 *)&rp->p, &rinfo->nexthop,
 			       rinfo->metric);
 
-      rp->info = NULL;
+      rninfo->rinfo = NULL;
       ripng_info_free (rinfo);
 
       route_unlock_node (rp);
@@ -984,7 +999,7 @@ ripng_redistribute_add (int type, int sub_type, struct prefix_ipv6 *p,
     rinfo->nexthop = *nexthop;
   
   rinfo->flags |= RIPNG_RTF_FIB;
-  rp->info = rinfo;
+  rninfo->rinfo = rinfo;
 
   /* Aggregate check. */
   ripng_aggregate_increment (rp, rinfo);
@@ -1029,9 +1044,9 @@ ripng_redistribute_delete (int type, int sub_type, struct prefix_ipv6 *p,
 
   rp = route_node_lookup (ripng->table, (struct prefix *) p);
 
-  if (rp)
+  if (rp && rp->info)
     {
-      rinfo = rp->info;
+      rinfo = ((struct ripng_node_info *)rp->info)->rinfo;
 
       if (rinfo != NULL
 	  && rinfo->type == type 
@@ -1070,7 +1085,8 @@ ripng_redistribute_withdraw (int type)
     return;
   
   for (rp = route_top (ripng->table); rp; rp = route_next (rp))
-    if ((rinfo = rp->info) != NULL)
+    if (rp->info && 
+        (rinfo = ((struct ripng_node_info *)rp->info)->rinfo) != NULL)
       {
 	if ((rinfo->type == type)
 	    && (rinfo->sub_type != RIPNG_ROUTE_INTERFACE))
@@ -1304,9 +1320,9 @@ ripng_request_process (struct ripng_packet *packet,int size,
 	  
 	  rp = route_node_lookup (ripng->table, (struct prefix *) &p);
 
-	  if (rp)
+	  if (rp && rp->info)
 	    {
-	      rinfo = rp->info;
+	      rinfo = ((struct ripng_node_info *)rp->info)->rinfo;
 	      rte->metric = rinfo->metric;
 	      route_unlock_node (rp);
 	    }
@@ -1417,7 +1433,8 @@ ripng_clear_changed_flag ()
   struct ripng_info *rinfo;
 
   for (rp = route_top (ripng->table); rp; rp = route_next (rp))
-    if ((rinfo = rp->info) != NULL)
+    if (rp->info &&
+        (rinfo = ((struct ripng_node_info *)rp->info)->rinfo) != NULL)
       if (rinfo->flags & RIPNG_RTF_CHANGED)
 	rinfo->flags &= ~RIPNG_RTF_CHANGED;
 }
@@ -1613,7 +1630,8 @@ ripng_output_process (struct interface *ifp, struct sockaddr_in6 *to,
  
   for (rp = route_top (ripng->table); rp; rp = route_next (rp))
     {
-      if ((rinfo = rp->info) != NULL && rinfo->suppress == 0)
+      struct ripng_node_info *ninfo = rp->info;
+      if (ninfo && (rinfo = ninfo->rinfo) != NULL && rinfo->suppress == 0)
 	{
 	  /* If no route-map are applied, the RTE will be these following
 	   * informations.
@@ -1735,7 +1753,7 @@ ripng_output_process (struct interface *ifp, struct sockaddr_in6 *to,
 	}
 
       /* Process the aggregated RTE entry */
-      if ((aggregate = rp->aggregate) != NULL && 
+      if (ninfo && (aggregate = ninfo->aggregate) != NULL && 
 	  aggregate->count > 0 && 
 	  aggregate->suppress == 0)
 	{
@@ -2013,7 +2031,9 @@ DEFUN (show_ipv6_ripng,
   
   for (rp = route_top (ripng->table); rp; rp = route_next (rp))
     {
-      if ((aggregate = rp->aggregate) != NULL)
+      struct ripng_node_info *ninfo = rp->info;
+      
+      if (ninfo && (aggregate = ninfo->aggregate))
 	{
 	  p = (struct prefix_ipv6 *) &rp->p;
 
@@ -2034,7 +2054,7 @@ DEFUN (show_ipv6_ripng,
 		   VTY_NEWLINE);
 	}
 
-      if ((rinfo = rp->info) != NULL)
+      if (ninfo && (rinfo = ninfo->rinfo) != NULL)
 	{
 	  p = (struct prefix_ipv6 *) &rp->p;
 
@@ -2222,6 +2242,7 @@ DEFUN (ripng_route,
   int ret;
   struct prefix_ipv6 p;
   struct route_node *rp;
+  struct ripng_node_info *ninfo;
 
   ret = str2prefix_ipv6 (argv[0], (struct prefix_ipv6 *)&p);
   if (ret <= 0)
@@ -2232,13 +2253,15 @@ DEFUN (ripng_route,
   apply_mask_ipv6 (&p);
 
   rp = route_node_get (ripng->route, (struct prefix *) &p);
-  if (rp->info)
+  if (rp->info && (ninfo = rp->info)->rinfo)
     {
       vty_out (vty, "There is already same static route.%s", VTY_NEWLINE);
       route_unlock_node (rp);
       return CMD_WARNING;
     }
-  rp->info = (void *)1;
+    
+  /* XXX: WTF? What an abuse.. */
+  ninfo->rinfo = (void *)1;
 
   ripng_redistribute_add (ZEBRA_ROUTE_RIPNG, RIPNG_ROUTE_STATIC, &p, 0, NULL);
 
@@ -2274,7 +2297,7 @@ DEFUN (no_ripng_route,
   ripng_redistribute_delete (ZEBRA_ROUTE_RIPNG, RIPNG_ROUTE_STATIC, &p, 0);
   route_unlock_node (rp);
 
-  rp->info = NULL;
+  ((struct ripng_node_info *)rp->info)->rinfo = NULL;
   route_unlock_node (rp);
 
   return CMD_SUCCESS;
@@ -2289,6 +2312,7 @@ DEFUN (ripng_aggregate_address,
   int ret;
   struct prefix p;
   struct route_node *node;
+  struct ripng_node_info *ninfo;
 
   ret = str2prefix_ipv6 (argv[0], (struct prefix_ipv6 *)&p);
   if (ret <= 0)
@@ -2299,13 +2323,13 @@ DEFUN (ripng_aggregate_address,
 
   /* Check aggregate alredy exist or not. */
   node = route_node_get (ripng->aggregate, &p);
-  if (node->info)
+  if (node->info && (ninfo = node->info)->rinfo)
     {
       vty_out (vty, "There is already same aggregate route.%s", VTY_NEWLINE);
       route_unlock_node (node);
       return CMD_WARNING;
     }
-  node->info = (void *)1;
+  ninfo->rinfo = (void *)1;
 
   ripng_aggregate_add (&p);
 
@@ -2337,7 +2361,7 @@ DEFUN (no_ripng_aggregate_address,
       return CMD_WARNING;
     }
   route_unlock_node (rn);
-  rn->info = NULL;
+  ((struct ripng_node_info *)rn->info)->rinfo = NULL;
   route_unlock_node (rn);
 
   ripng_aggregate_delete (&p);
@@ -2806,7 +2830,8 @@ ripng_clean()
   if (ripng) {
     /* Clear RIPng routes */
     for (rp = route_top (ripng->table); rp; rp = route_next (rp)) {
-      if ((rinfo = rp->info) != NULL) {
+      if (rp->info &&
+          (rinfo = ((struct ripng_node_info *)rp->info)->rinfo) != NULL) {
         if ((rinfo->type == ZEBRA_ROUTE_RIPNG) &&
             (rinfo->sub_type == RIPNG_ROUTE_RTE))
           ripng_zebra_ipv6_delete ((struct prefix_ipv6 *)&rp->p,

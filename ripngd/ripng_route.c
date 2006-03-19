@@ -51,14 +51,18 @@ void
 ripng_aggregate_increment (struct route_node *child, struct ripng_info *rinfo)
 {
   struct route_node *np;
+  struct ripng_node_info *ni;
   struct ripng_aggregate *aggregate;
 
   for (np = child; np; np = np->parent)
-    if ((aggregate = np->aggregate) != NULL)
-      {
-	aggregate->count++;
-	rinfo->suppress++;
-      }
+    {
+      ni = np->info;
+      if (ni && (aggregate = ni->aggregate) != NULL)
+        {
+	  aggregate->count++;
+	  rinfo->suppress++;
+        }
+    }
 }
 
 /* Aggregate count decrement check. */
@@ -67,13 +71,17 @@ ripng_aggregate_decrement (struct route_node *child, struct ripng_info *rinfo)
 {
   struct route_node *np;
   struct ripng_aggregate *aggregate;
-
+  struct ripng_node_info *ni;
+  
   for (np = child; np; np = np->parent)
-    if ((aggregate = np->aggregate) != NULL)
-      {
-	aggregate->count--;
-	rinfo->suppress--;
-      }
+    {
+      ni = np->info;
+      if (ni && (aggregate = ni->aggregate) != NULL)
+        {
+	  aggregate->count--;
+	  rinfo->suppress--;
+        }
+    }
 }
 
 /* RIPng routes treatment. */
@@ -83,29 +91,34 @@ ripng_aggregate_add (struct prefix *p)
   struct route_node *top;
   struct route_node *rp;
   struct ripng_info *rinfo;
+  struct ripng_node_info *ninfo;
   struct ripng_aggregate *aggregate;
   struct ripng_aggregate *sub;
 
   /* Get top node for aggregation. */
   top = route_node_get (ripng->table, p);
-
+  if (!top->info)
+    top->info = ripng_node_info_new ();
+  ninfo = top->info;
+  
   /* Allocate new aggregate. */
   aggregate = ripng_aggregate_new ();
   aggregate->metric = 1;
 
-  top->aggregate = aggregate;
+  ninfo->aggregate = aggregate;
 
   /* Suppress routes match to the aggregate. */
   for (rp = route_lock_node (top); rp; rp = route_next_until (rp, top))
     {
       /* Suppress normal route. */
-      if ((rinfo = rp->info) != NULL)
+      if ((rinfo = ninfo->rinfo) != NULL)
 	{
 	  aggregate->count++;
 	  rinfo->suppress++;
 	}
       /* Suppress aggregate route.  This may not need. */
-      if (rp != top && (sub = rp->aggregate) != NULL)
+      if (rp != top && rp->info &&
+          (sub = ((struct ripng_node_info *)rp->info)->aggregate) != NULL)
 	{
 	  aggregate->count++;
 	  sub->suppress++;
@@ -122,33 +135,38 @@ ripng_aggregate_delete (struct prefix *p)
   struct route_node *top;
   struct route_node *rp;
   struct ripng_info *rinfo;
+  struct ripng_node_info *ninfo;
   struct ripng_aggregate *aggregate;
   struct ripng_aggregate *sub;
 
   /* Get top node for aggregation. */
-  top = route_node_get (ripng->table, p);
-
+  if ( (top = route_node_lookup (ripng->table, p)) != NULL)
+    ninfo = top->info;
+  else
+    return 0;
+  
   /* Allocate new aggregate. */
-  aggregate = top->aggregate;
+  aggregate = ninfo->aggregate;
 
   /* Suppress routes match to the aggregate. */
   for (rp = route_lock_node (top); rp; rp = route_next_until (rp, top))
     {
       /* Suppress normal route. */
-      if ((rinfo = rp->info) != NULL)
+      if ((rinfo = ninfo->rinfo) != NULL)
 	{
 	  aggregate->count--;
 	  rinfo->suppress--;
 	}
 
-      if (rp != top && (sub = rp->aggregate) != NULL)
+      if (rp != top && rp->info 
+          && (sub = ((struct ripng_node_info *)rp->info)->aggregate) != NULL)
 	{
 	  aggregate->count--;
 	  sub->suppress--;
 	}
     }
 
-  top->aggregate = NULL;
+  ninfo->aggregate = NULL;
   ripng_aggregate_free (aggregate);
 
   route_unlock_node (top);
