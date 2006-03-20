@@ -1,0 +1,8 @@
+2006-03-20 Paul Jakma <paul.jakma@sun.com>
+
+	* (md5qd.c): New file. Userspace TCP-MD5 for Linux using
+	  Netfilter QUEUEing.
+	* README.md5qd.txt: New file.
+	* md5qd.conf.sample: New file. sample config. Config format
+	  is unstable.
+	* Makefile.am: New file.

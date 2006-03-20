@@ -47,6 +47,7 @@ const char *zlog_proto_names[] =
   "OSPF6",
   "ISIS",
   "MASC",
+  "MD5QD",
   NULL,
 };
 

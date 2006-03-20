@@ -701,6 +701,7 @@ vty_end_config (struct vty *vty)
     case KEYCHAIN_KEY_NODE:
     case MASC_NODE:
     case VTY_NODE:
+    case MD5Q_NODE:
       vty_config_unlock (vty);
       vty->node = ENABLE_NODE;
       break;
@@ -1107,6 +1108,7 @@ vty_stop_input (struct vty *vty)
     case KEYCHAIN_KEY_NODE:
     case MASC_NODE:
     case VTY_NODE:
+    case MD5Q_NODE:
       vty_config_unlock (vty);
       vty->node = ENABLE_NODE;
       break;

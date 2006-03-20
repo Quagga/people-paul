@@ -2390,6 +2390,7 @@ DEFUN (config_exit,
     case MASC_NODE:
     case RMAP_NODE:
     case VTY_NODE:
+    case MD5Q_NODE:
       vty->node = CONFIG_NODE;
       break;
     case BGP_VPNV4_NODE:
@@ -2445,6 +2446,7 @@ DEFUN (config_end,
     case KEYCHAIN_KEY_NODE:
     case MASC_NODE:
     case VTY_NODE:
+    case MD5Q_NODE:
       vty_config_unlock (vty);
       vty->node = ENABLE_NODE;
       break;

@@ -98,7 +98,8 @@ enum node_type
   SMUX_NODE,			/* SNMP configuration node. */
   DUMP_NODE,			/* Packet dump node. */
   FORWARDING_NODE,		/* IP forwarding node. */
-  VTY_NODE			/* Vty node. */
+  VTY_NODE,			/* Vty node. */
+  MD5Q_NODE,			/* TCP-MD5 Queue daemon node */
 };
 
 /* Node which has some commands and prompt string and configuration

@@ -1,3 +1,11 @@
+2006-03-20 Paul Jakma <paul.jakma@sun.com>
+
+	* command.h: Add MD5Q_NODE.
+	* {vty,command}.c: Add MD5Q_NODEs.
+	* log.{c,h}: Add ZLOG_MD5QD.
+	* memory.c: Add md5q memory command.
+	* memtypes.c: Add md5q memtypes.
+
 2006-03-19 Paul Jakma <paul.jakma@sun.com>
 
 	* checksum.{c,h}: (in_cksum_{accumulate,finish}) Export

@@ -1,0 +1,14 @@
+Makefile
+Makefile.in
+*.o
+md5qd
+md5qd.conf
+tags
+TAGS
+.deps
+.nfs*
+*.lo
+*.la
+*.libs
+.arch-inventory
+.arch-ids
