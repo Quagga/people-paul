@@ -1,3 +1,11 @@
+2006-03-20 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: Check for required md5qd header dependencies on
+	  linux, enable md5qd build if found.
+	  Add defines for md5qd state files.
+	  Generate md5qd/ makefile.
+	* Makefile.am: Add md5qd
+
 2006-02-15 Paul Jakma <paul.jakma@sun.com>
 
 	* configure.ac: Check for mallinfo, being careful to link test

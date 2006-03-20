@@ -678,6 +678,16 @@ fi
 AC_SUBST(IF_METHOD)
 AC_SUBST(IOCTL_METHOD)
 
+dnl ---------------------------------
+dnl check for libipq.h, for Linux MD5
+dnl ---------------------------------
+if test x"$opsys" = x"gnu-linux"; then
+  AC_CHECK_HEADERS([linux/netfilter.h libipq.h],
+                   [MD5QD="md5qd"
+                    AC_SUBST(MD5QD)])
+fi
+
+
 dnl ---------------------------------------------------------------
 dnl figure out how to specify an interface in multicast sockets API
 dnl ---------------------------------------------------------------
@@ -1299,6 +1309,7 @@ AC_DEFINE_UNQUOTED(PATH_OSPFD_PID, "$quagga_statedir/ospfd.pid",ospfd PID)
 AC_DEFINE_UNQUOTED(PATH_OSPF6D_PID, "$quagga_statedir/ospf6d.pid",ospf6d PID)
 AC_DEFINE_UNQUOTED(PATH_ISISD_PID, "$quagga_statedir/isisd.pid",isisd PID)
 AC_DEFINE_UNQUOTED(PATH_WATCHQUAGGA_PID, "$quagga_statedir/watchquagga.pid",watchquagga PID)
+AC_DEFINE_UNQUOTED(PATH_MD5QD_PID, "$quagga_statedir/md5qd.pid",md5qd PID)
 AC_DEFINE_UNQUOTED(ZEBRA_SERV_PATH, "$quagga_statedir/zserv.api",zebra api socket)
 AC_DEFINE_UNQUOTED(ZEBRA_VTYSH_PATH, "$quagga_statedir/zebra.vty",zebra vty socket)
 AC_DEFINE_UNQUOTED(RIP_VTYSH_PATH, "$quagga_statedir/ripd.vty",rip vty socket)
@@ -1307,6 +1318,7 @@ AC_DEFINE_UNQUOTED(BGP_VTYSH_PATH, "$quagga_statedir/bgpd.vty",bgpd vty socket)
 AC_DEFINE_UNQUOTED(OSPF_VTYSH_PATH, "$quagga_statedir/ospfd.vty",ospfd vty socket)
 AC_DEFINE_UNQUOTED(OSPF6_VTYSH_PATH, "$quagga_statedir/ospf6d.vty",ospf6d vty socket)
 AC_DEFINE_UNQUOTED(ISIS_VTYSH_PATH, "$quagga_statedir/isisd.vty",isisd vty socket)
+AC_DEFINE_UNQUOTED(MD5QD_VTYSH_PATH, "$quagga_statedir/md5qd.vty",md5qd vty socket)
 AC_DEFINE_UNQUOTED(DAEMON_VTY_DIR, "$quagga_statedir",daemon vty directory)
 
 dnl -------------------------------
@@ -1340,6 +1352,7 @@ AC_CONFIG_FILES([Makefile lib/Makefile zebra/Makefile ripd/Makefile
 	  ripngd/Makefile bgpd/Makefile ospfd/Makefile watchquagga/Makefile
 	  ospf6d/Makefile isisd/Makefile vtysh/Makefile doc/Makefile 
 	  ospfclient/Makefile tests/Makefile m4/Makefile redhat/Makefile
+	  md5qd/Makefile
 	  pkgsrc/Makefile
 	  redhat/quagga.spec 
 	  lib/version.h
