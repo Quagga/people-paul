@@ -45,7 +45,7 @@
 
 # as distros change packages we depend on, our Requires have to change, sadly.
 %define quagga_buildreqs texinfo tetex autoconf pam-devel
-%define quagga_buildreqs %{quagga_buildreqs} patch libcap-devel
+%define quagga_buildreqs %{quagga_buildreqs} patch libcap-devel iptables-devel
 
 # FC4 and 5 split texi2html out of tetex package.
 %if "%dist" == "fc4" || "%dist" == "fc5"
@@ -65,7 +65,7 @@
 # misc internal defines
 %{!?quagga_uid:		%define         quagga_uid      92 }
 %{!?quagga_gid:		%define         quagga_gid      92 }
-%define		daemon_list	zebra ripd ospfd bgpd
+%define		daemon_list	zebra ripd ospfd bgpd md5qd
 
 %if %{with_ipv6}
 %define		daemonv6_list	ripngd ospf6d
@@ -379,7 +379,8 @@ rm -rf $RPM_BUILD_ROOT
 
 %files
 %defattr(-,root,root)
-%doc */*.sample* AUTHORS COPYING
+%doc */*.sample* AUTHORS COPYING COPYING.LIB
+%doc md5qd/README.md5qd.txt
 %doc doc/quagga.html
 %doc doc/mpls
 %doc ChangeLog INSTALL NEWS README REPORTING-BUGS SERVICES TODO
@@ -406,6 +407,7 @@ rm -rf $RPM_BUILD_ROOT
 %if %{with_ipv6}
 %{_sbindir}/ripngd
 %{_sbindir}/ospf6d
+%{_sbindir}/md5qd
 %endif
 %if %{with_isisd}
 %{_sbindir}/isisd

@@ -1,0 +1,64 @@
+#!/bin/bash
+#
+# chkconfig: 2345 16 84
+# description: Daemon to add/check TCP-MD5 via Netfilter QUEUE target
+#
+# processname: md5qd
+# config: /etc/quagga/md5qd.conf
+
+# source function library
+. /etc/rc.d/init.d/functions
+
+# Get network config
+. /etc/sysconfig/network
+
+# quagga command line options
+. /etc/sysconfig/quagga
+
+# Check that networking is up.
+[ "${NETWORKING}" = "no" ] && exit 0
+
+# The process must be configured first.
+[ -f /etc/quagga/md5qd.conf ] || exit 0
+
+RETVAL=0
+
+prog="md5qd"
+
+case "$1" in
+  start)
+	echo -n $"Starting $prog: "
+        daemon /usr/sbin/md5qd -d $MD5QD_OPTS
+	RETVAL=$?
+	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/md5qd
+	echo
+	;;
+  stop)
+	echo -n $"Shutting down $prog: "
+	killproc md5qd
+	RETVAL=$?
+	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/md5qd
+	echo
+	;;
+  restart|reload)
+        $0 stop
+        $0 start
+	RETVAL=$?
+        ;;
+  condrestart)
+        if [ -f /var/lock/subsys/md5qd ]; then
+                $0 stop
+		$0 start
+        fi
+	RETVAL=$?
+        ;;
+  status)
+        status md5qd
+	RETVAL=$?
+        ;;
+  *)
+	echo $"Usage: $0 {start|stop|restart|reload|condrestart|status}"
+	exit 1
+esac
+
+exit $RETVAL

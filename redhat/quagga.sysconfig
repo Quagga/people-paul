@@ -9,6 +9,7 @@ RIPD_OPTS="-A 127.0.0.1 -f ${QCONFDIR}/ripd.conf"
 RIPNGD_OPTS="-A ::1 -f ${QCONFDIR}/ripngd.conf"
 ZEBRA_OPTS="-A 127.0.0.1 -f ${QCONFDIR}/zebra.conf"
 ISISD_OPTS="-A ::1 -f ${QCONFDIR}/isisd.conf"
+MD5QD_OPTS="-A 127.0.0.1 -f ${QCONFDIR}/md5qd.conf"
 
 # Watchquagga configuration (please check timer values before using):
 WATCH_OPTS=""
