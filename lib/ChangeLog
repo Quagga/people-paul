@@ -1,3 +1,7 @@
+2006-04-01 Paul Jakma <paul.jakma@sun.com>
+
+	* memtypes.c: Fix merge error.
+
 2006-03-30 Paul Jakma <paul.jakma@sun.com>
 
 	* command.h: (DEFUN_CMD_FUNC_TEXT) Annotate arguments as
