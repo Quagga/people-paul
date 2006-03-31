@@ -1,3 +1,18 @@
+2006-03-30 Paul Jakma <paul.jakma@sun.com>
+
+	* command.h: (DEFUN_CMD_FUNC_TEXT) Annotate arguments as
+	  potentially being unused.
+	* workqueue.c: (work_queue_run) fix line length of comment
+
+2006-03-27 Paul Jakma <paul.jakma@sun.com>
+
+	* memtypes.awk: Fix gensub call, g should be a string..
+
+2006-03-25 Paul Jakma <paul.jakma@sun.com>
+
+	* workqueue.h: (struct work_queue) Remove status field and
+	  state flag, no longer used.
+
 2006-03-20 Paul Jakma <paul.jakma@sun.com>
 
 	* command.h: Add MD5Q_NODE.
@@ -8,15 +23,15 @@
 
 2006-03-19 Paul Jakma <paul.jakma@sun.com>
 
+	* memtypes.c: Add MTYPE_BGP_SYNCHRONISE.
+
+2006-03-19 Paul Jakma <paul.jakma@sun.com>
+
 	* checksum.{c,h}: (in_cksum_{accumulate,finish}) Export
 	  accumulate/finish style in_cksum, allowing checksuming 
 	  across arbitrary sets of data (like md5 summing).
 	  (in_cksum) No point using an int where a uint16_t is all
 	  that's needed.
-
-2006-03-19 Paul Jakma <paul.jakma@sun.com>
-
-	* memtypes.c: Add MTYPE_BGP_SYNCHRONISE.
 
 2006-03-16 Paul Jakma <paul.jakma@sun.com>
 
