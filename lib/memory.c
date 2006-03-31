@@ -40,23 +40,30 @@
 
 static void log_memstats(int log_priority);
 static const int redzone_marker = 0xf0f0f0f0;
-
-static struct message mstr [] =
-{
-  { MTYPE_THREAD, "thread" },
-  { MTYPE_THREAD_MASTER, "thread_master" },
-  { MTYPE_VECTOR, "vector" },
-  { MTYPE_VECTOR_INDEX, "vector_index" },
-  { MTYPE_IF, "interface" },
-  { 0, NULL },
-};
 
+static const char *
+lookup_memtype(int key)
+{
+  /* use global mlists */
+  struct mlist *list;
+  
+  for (list = &mlists[0]; list != NULL; list++) 
+    {
+      struct memory_list *m;
+      
+      for (m = list[0].list; m->index >= 0; m++)
+        if (m->index == key)
+          return m->format;
+    }
+  return "";
+}
+
 /* Fatal memory allocation error occured. */
 static void __attribute__ ((noreturn))
 zerror (const char *fname, int type, size_t size)
 {
   zlog_err ("%s : can't allocate memory for `%s' size %d: %s\n", 
-	    fname, lookup (mstr, type), (int) size, safe_strerror(errno));
+	    fname, lookup_memtype (type), (int) size, safe_strerror(errno));
   log_memstats(LOG_WARNING);
   /* N.B. It might be preferable to call zlog_backtrace_sigsafe here, since
      that function should definitely be safe in an OOM condition.  But
@@ -985,7 +992,7 @@ mtype_memstr (char *buf, size_t len, unsigned long bytes)
        * Just hacked to make it not warn on 'smaller' machines. 
        * Static compiler analysis should mean no extra code
        */
-      if (bytes & (1 << (sizeof (unsigned long) >= 8 ? 39 : 0)))
+      if (bytes & (1UL << ((sizeof (unsigned long) >= 8) ? 39 : 0)))
         t++;
       snprintf (buf, len, "%4d TiB", t);
     }

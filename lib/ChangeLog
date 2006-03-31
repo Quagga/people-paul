@@ -1,6 +1,12 @@
 2006-04-01 Paul Jakma <paul.jakma@sun.com>
 
 	* memtypes.c: Fix merge error.
+	* memory.c: (static struct message mstr) Delete, to be replaced
+	  with lookup function.
+	  (lookup_memtype) lookup string for memtype.
+	  (zerror) use lookup_memtype
+	  (mtype_memstr) Constant to be shifted 39 left should of
+	  course be qualified to have unsigned long type.
 
 2006-03-30 Paul Jakma <paul.jakma@sun.com>
 
