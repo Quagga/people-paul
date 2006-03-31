@@ -1,3 +1,59 @@
+2006-03-30 Paul Jakma <paul.jakma@sun.com>
+
+	* bgp_community.c: (community_gettoken) Unknown token should
+	  return NULL, to give a strong indication to callers that
+	  the token no longer can be parsed, otherwise callers looping
+	  on this function may have a hard time ending their loop.
+	  (community_str2com) While loop around community_gettoken appears
+	  to have been coded thinking that break statement would break
+	  from the while{}, hence it could never exit for unknown token
+	  case. Fix it to do..while, so it can use the NULL result from
+	  community_gettoken easily.
+
+2006-03-22 Paul Jakma <paul.jakma@sun.com>
+
+	* bgpd.c: (peer_free) release the per-peer workqueue when
+	  freeing the peer.
+
+2006-03-19 Paul Jakma <paul.jakma@sun.com>
+
+	* bgpd/bgp_vty.c: Add includes to get several structs we want
+	  to provide usage statistics on.
+	  (show_bgp_memory_cmd) Show memory usage stats for various
+	  notable fixed size objects. Using mtype_stats_alloc and
+	  mtype_memstr recently added to memory.c.
+	  (bgp_show_summary) Report some additional stats specific to
+	  the given BGP instance and/or AFI/SAFI such as table counts,
+	  peers, rsclients and peer-groups.
+	  (bgp_vty_init) Install show_bgp_memory_cmd.
+	* bgp_nexthop.h: Include if.h as a dependent header, for struct
+	  connected.
+	* bgp_advertise.c: Use a distinct memory type for struct
+	  bgp_synchronize.
+
+2006-03-12 Paul Jakma <paul.jakma@sun.com>
+
+	* bgp_attr.h: (struct attr) rearrange fields to avoid
+	  wasted padding between them as much as possible.
+	  (attr_count,attr_unknown_count) export new functions to
+	  return number of counts of cached attributes.
+	* bgp_attr.c: (attr_count,attr_unknown_count) new functions to
+	  return number of counts of cached attributes.
+	* bgp_route.h: (struct bgp_info) rearrange fields to avoid
+	  wasted padding.
+	* bgp_table.h: (struct bgp_table) Add a count field, of number
+	  of nodes in the table.
+	  (struct bgp_node)  rearrange fields to avoid
+	  wasted padding between them, though I don't think there
+	  was any in this case. 
+	* bgp_table.c: (bgp_node_{delete,get}) Maintain the table node count.
+	  (bgp_table_count) new function to access the table count.
+
+2006-03-03 Paul Jakma <paul.jakma@sun.com>
+
+	* bgp_route.c: (bgp_clear_node_complete) Doh. When clearing
+	  is complete we need to kick off FSM again.
+
 2006-02-21 Paul Jakma <paul.jakma@sun.com>
 
 	* bgpd.h: move the clear_node_queue to be peer specific.

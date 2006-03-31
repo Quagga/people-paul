@@ -1,3 +1,53 @@
+2006-03-30 Paul Jakma <paul.jakma@sun.com>
+
+	* command.h: (DEFUN_CMD_FUNC_TEXT) Annotate arguments as
+	  potentially being unused.
+	* workqueue.c: (work_queue_run) fix line length of comment
+
+2006-03-27 Paul Jakma <paul.jakma@sun.com>
+
+	* memtypes.awk: Fix gensub call, g should be a string..
+
+2006-03-25 Paul Jakma <paul.jakma@sun.com>
+
+	* workqueue.h: (struct work_queue) Remove status field and
+	  state flag, no longer used.
+
+2006-03-19 Paul Jakma <paul.jakma@sun.com>
+
+	* memtypes.c: Add MTYPE_BGP_SYNCHRONISE.
+
+2006-03-16 Paul Jakma <paul.jakma@sun.com>
+
+	* Makefile.am: Fix -version-info argument.
+
+2006-03-15 Paul Jakma <paul.jakma@sun.com>
+
+	* memory.c: (mtype_memstr) new helper function to 
+	  return human friendly string for a byte count.
+	  (mtype_stats_alloc) new function, for users to retrieve
+	  number of objects allocated.
+	  (show_memory_mallinfo) New function, show mallinfo statistics
+	  if available.
+	  (show_memory_all_cmd) Call show_memory_mallinfo, if mallinfo
+	  is available.
+	* memory.h: Export mtype_memstr and mtype_stats_alloc.
+	  Provide a define for a reasonable buffer size for
+	  mtype_memstr.
+	  
+2006-03-14 Paul Jakma <paul.jakma@sun.com>
+
+	* privs.c: (zprivs_caps_init) Change user IDs before lowering
+	  privileges, while this seems to work on Linux, on Solaris
+	  it rightfully refuses due to PRIV_PROC_SETID having been
+	  dropped.
+	* command.h: Add the struct host global exported from command.c
+
+2006-03-06 Paul Jakma <paul.jakma@sun.com>
+
+	* if.h: export show_address_cmd, for anyone who wishes to use
+	  it.
+
 2006-02-21 Paul Jakma <paul.jakma@sun.com>
 
 	* sockunion.c: (sockunion_{su2str,log}) Use XSTRDUP.

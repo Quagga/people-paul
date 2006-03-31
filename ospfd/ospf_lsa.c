@@ -202,7 +202,7 @@ ospf_lsa_checksum (struct lsa_header *lsa)
       c1 %= 255;
     }
 
-  x = ((length - LSA_CHECKSUM_OFFSET) * c0 - c1) % 255;
+  x = (((int)length - LSA_CHECKSUM_OFFSET) * c0 - c1) % 255;
   if (x <= 0)
     x += 255;
   y = 510 - c0 - x;
@@ -2786,7 +2786,7 @@ ospf_lsa_install (struct ospf *ospf, struct ospf_interface *oi,
       can be originated. "
    */
 
-  if (ntohl(lsa->data->ls_seqnum) - 1 ==  htonl(OSPF_MAX_SEQUENCE_NUMBER))
+  if (ntohl(lsa->data->ls_seqnum) - 1 == OSPF_MAX_SEQUENCE_NUMBER)
     {
       if (ospf_lsa_is_self_originated(ospf, lsa))
         {
