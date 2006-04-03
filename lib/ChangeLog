@@ -1,3 +1,8 @@
+2006-04-03 Paul Jakma <paul.jakma@sun.com>
+
+	* memtypes.c: (memory_list_bgp) BGP Advertise objects are
+	  good candidates for caching.
+
 2006-04-01 Paul Jakma <paul.jakma@sun.com>
 
 	* memtypes.c: Fix merge error.
