@@ -452,7 +452,10 @@ md5q_add_md5 (struct md5q_thread *md5qt, struct host_config *hc)
       nvecs++;
     }
   else
-    iov[4].iov_len = 0;
+    {
+      iov[4].iov_base = NULL;
+      iov[4].iov_len = 0;
+    }
   
   if (debug_packet)
     {
@@ -480,7 +483,7 @@ md5q_add_md5 (struct md5q_thread *md5qt, struct host_config *hc)
   /* TCP header, static section, sans options */
   MD5Update (&ctx, tcph, sizeof(struct tcphdr));
   /* Segment data */
-  if (data_offset > m->data_len)
+  if (iov[4].iov_len)
     MD5Update (&ctx, iov[4].iov_base, iov[4].iov_len);
   /* password */
   MD5Update (&ctx, hc->password, strlen (hc->password));
@@ -606,7 +609,7 @@ md5q_pkt_verify (struct md5q_thread *md5qt, struct host_config *hc)
   /* TCP header, static section, sans options */
   MD5Update (&ctx, tcph, sizeof(struct tcphdr));
   /* Segment data */
-  if (data_offset > m->data_len)
+  if (data_size)
     MD5Update (&ctx, (m->payload + data_offset), data_size);
   /* password */
   MD5Update (&ctx, hc->password, strlen (hc->password));
