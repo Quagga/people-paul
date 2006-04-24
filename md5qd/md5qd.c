@@ -373,7 +373,7 @@ md5q_add_md5 (struct md5q_thread *md5qt, struct host_config *hc)
   
   if (m->data_len < ((4 * iph->ip_hl) + sizeof (struct tcphdr)))
     {
-      zlog_err ("%s: packet length %ld shorter than TCP header",
+      zlog_err ("%s: packet length %zd shorter than TCP header",
                 __func__, m->data_len);
       return;
     }
@@ -459,13 +459,13 @@ md5q_add_md5 (struct md5q_thread *md5qt, struct host_config *hc)
   
   if (debug_packet)
     {
-      zlog_debug ("m %ld, v %ld, tseg: %d, data_off %d, dz: %zd, nvec: %d",
+      zlog_debug ("m %zd, v %zd, tseg: %d, data_off %d, dz: %zd, nvec: %d",
                   m->data_len, pm.msg.verdict.data_len, 
                   tcpseglen, data_offset, data_size, nvecs);
-      zlog_debug ("iov len: 0: %ld, 1: %ld, 2: %ld, 3: %ld 4: %ld",
+      zlog_debug ("iov len: 0: %zd, 1: %zd, 2: %zd, 3: %zd 4: %zd",
                   iov[0].iov_len, iov[1].iov_len, iov[2].iov_len, 
                   iov[3].iov_len, iov[4].iov_len);
-      zlog_debug ("pm len: %ld, tlen %zd, iov 2-4 len: %ld",
+      zlog_debug ("pm len: %zd, tlen %zd, iov 2-4 len: %zd",
                   pm.msg.verdict.data_len, tlen,
                   iov[2].iov_len + iov[3].iov_len + iov[4].iov_len);
     }
@@ -551,7 +551,7 @@ md5q_pkt_verify (struct md5q_thread *md5qt, struct host_config *hc)
   
   if (m->data_len < ((4 * iph->ip_hl) + sizeof (struct tcphdr)))
     {
-      zlog_err ("%s: packet length %ld shorter than TCP header",
+      zlog_err ("%s: packet length %zd shorter than TCP header",
                 __func__, m->data_len);
       return NF_DROP;
     }
@@ -654,9 +654,9 @@ md5q_pkt_process (struct md5q_thread *md5qt)
     {
       zlog_info ("%s: processing", __func__);
       zlog_info ("pkt id: %lu, proto: %u", m->packet_id, iph->ip_p);
-      zlog_info ("in:  %-20s len: %ld", 
+      zlog_info ("in:  %-20s len: %zd", 
                  m->indev_name, strlen(m->indev_name));
-      zlog_info ("out: %-20s len: %ld",
+      zlog_info ("out: %-20s len: %zd",
                  m->outdev_name, strlen(m->outdev_name));
     }
 
