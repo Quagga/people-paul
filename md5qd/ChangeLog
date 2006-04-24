@@ -1,3 +1,7 @@
+2006-04-24 Chris Caputo <ccaputo@alt.net>
+
+	* md5qd.c: (md5q_fill_opts) Fix handling of unknown options.
+
 2006-03-20 Paul Jakma <paul.jakma@sun.com>
 
 	* (md5qd.c): New file. Userspace TCP-MD5 for Linux using

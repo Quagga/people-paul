@@ -244,7 +244,8 @@ struct md5q_wscale_slot
 static u_char
 md5q_fill_opts (struct md5q_tcp_opts *opts, u_char *from, size_t len)
 {
-  u_char bytes = 0, nextfree = 0;
+  unsigned int bytes = 0;
+  u_char nextfree = 0;
   struct md5q_mss_slot *mslot = NULL;
   struct md5q_wscale_slot *wslot = NULL;
   u_char *tslot = NULL;
@@ -276,6 +277,9 @@ md5q_fill_opts (struct md5q_tcp_opts *opts, u_char *from, size_t len)
     {
       switch (from[bytes])
         {
+          case TCPOPT_NOP:
+            bytes++;
+            break;
           case TCPOPT_EOL:
             return nextfree;
           case TCPOPT_MAXSEG:
@@ -332,9 +336,15 @@ md5q_fill_opts (struct md5q_tcp_opts *opts, u_char *from, size_t len)
             memcpy ((tslot + 2), &from[bytes], TCPOLEN_TIMESTAMP);
             bytes += TCPOLEN_TIMESTAMP;
             break;
-          case TCPOPT_NOP:
           default:
-            bytes++;
+            /* All options, bar EOL and NOP, must follow standard option
+             * header format of two octets of kind, length.
+             */
+            if ((bytes + 1) < len)
+              bytes += from[bytes+1];
+            else
+              return nextfree;
+            break;
         }
     }
   return nextfree;
