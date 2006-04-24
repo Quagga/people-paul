@@ -1,6 +1,8 @@
 2006-04-24 Chris Caputo <ccaputo@alt.net>
 
 	* md5qd.c: (md5q_fill_opts) Fix handling of unknown options.
+	  (md5q_{add_md5,pkt_verify}) IP protocol in psuedo-header
+	  should be padded.
 
 2006-03-20 Paul Jakma <paul.jakma@sun.com>
 

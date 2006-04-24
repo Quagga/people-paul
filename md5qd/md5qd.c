@@ -367,6 +367,7 @@ md5q_add_md5 (struct md5q_thread *md5qt, struct host_config *hc)
   uint16_t tcpseglen, nseglen, tmp, data_offset;
   size_t data_size, optslots;
   MD5_CTX ctx;
+  char zero_pad = 0;
   
   tcph = (struct tcphdr *)(m->payload + (4 * iph->ip_hl));
   
@@ -472,6 +473,7 @@ md5q_add_md5 (struct md5q_thread *md5qt, struct host_config *hc)
   /* TCP pseudo-header */
   MD5Update (&ctx, &iph->ip_src.s_addr, sizeof (in_addr_t));
   MD5Update (&ctx, &iph->ip_dst.s_addr, sizeof (in_addr_t));
+  MD5Update (&ctx, &zero_pad, 1);
   MD5Update (&ctx, &iph->ip_p, 1);
   nseglen = htons (tcpseglen);
   MD5Update (&ctx, &nseglen, sizeof(nseglen));
@@ -542,6 +544,7 @@ md5q_pkt_verify (struct md5q_thread *md5qt, struct host_config *hc)
   u_char digest[16];
   u_char *authdata;
   MD5_CTX ctx;
+  char zero_pad = 0;
   
   if (m->data_len < ((4 * iph->ip_hl) + sizeof (struct tcphdr)))
     {
@@ -596,6 +599,7 @@ md5q_pkt_verify (struct md5q_thread *md5qt, struct host_config *hc)
   /* TCP pseudo-header */
   MD5Update (&ctx, &iph->ip_src.s_addr, sizeof (in_addr_t));
   MD5Update (&ctx, &iph->ip_dst.s_addr, sizeof (in_addr_t));
+  MD5Update (&ctx, &zero_pad, 1);
   MD5Update (&ctx, &iph->ip_p, 1);
   tmp = htons (tcpseglen);
   MD5Update (&ctx, &tmp, sizeof(tmp));
