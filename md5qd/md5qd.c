@@ -261,7 +261,8 @@ md5q_fill_opts (struct md5q_tcp_opts *opts, u_char *from, size_t len)
     DUMPBYTES ("orig options", from, len);
   
   /* impossible, or nothing to do */
-  if ( (len == 0) || (len > 40) )
+#define TCP_OPTION_SPACE 40
+  if ( (len == 0) || (len > TCP_OPTION_SPACE) )
     return 0;
   
   /* Allow only Window-Scale, MSS and Timestamp options. We don't allow
@@ -536,6 +537,53 @@ md5q_add_md5 (struct md5q_thread *md5qt, struct host_config *hc)
   return;
 }
 
+static void *
+md5q_find_md5(void *data, u_char *end)
+{
+  u_char *ptr = data;
+  const size_t length = end - ptr;
+  unsigned int bytes = 0;
+  
+  if (debug)
+    zlog_debug ("%s: length = %zd", __func__, length);
+  
+  /* nothing to do? */
+  if ((length < TCPMD5_OPT_SIZE) || (length > TCP_OPTION_SPACE))
+    return NULL;
+  
+  /* code borrowed from linux kernel RFC2385 patch tcp_v4_inbound_md5_hash().
+   *
+   * Bounds check on length-1 means we'll never parse a trailing NOP or
+   * EOL, but we're not looking for those - simplifies bounds checking.
+   */
+  while (bytes < (length - 1))
+    {
+      u_char opcode = ptr[bytes];
+      size_t opsize;
+      
+      switch (opcode)
+        {
+          case TCPOPT_EOL:
+            return NULL;
+          case TCPOPT_NOP:
+            bytes++;
+            continue;
+          default:
+            opsize = ptr[bytes + 1];
+            if ((opsize < 2) || (opsize > (length - bytes)))
+              return NULL;
+            if (opcode == TCPOPT_MD5)
+              {
+                if (opsize < TCPMD5_OPT_SIZE)
+                  return NULL;
+                return &ptr[bytes + 2];
+              }
+        }
+      bytes += opsize;
+    }
+  return NULL;
+}
+
 static int
 md5q_pkt_verify (struct md5q_thread *md5qt, struct host_config *hc)
 {
@@ -570,30 +618,13 @@ md5q_pkt_verify (struct md5q_thread *md5qt, struct host_config *hc)
     DUMPBYTES ("original packet", m->payload, m->data_len);
   
   /* Find the tcp MD5 authentication data */
-  authdata = (m->payload + 4*iph->ip_hl + sizeof(struct tcphdr));
-  
-  while (authdata < (m->payload + data_offset - TCPMD5_OPT_SIZE))
-    {
-      if (*authdata == TCPOPT_MD5)
-        break;
-      authdata++;
-    }
-  if (authdata >= (m->payload + data_offset - TCPMD5_OPT_SIZE))
+  authdata = md5q_find_md5 ((tcph + 1), m->payload + data_offset);
+  if (authdata == NULL)
     {
       if (debug)
-        zlog_debug ("%s: no TCPMD5_opt found", __func__);
+        zlog_info ("%s: MD5 TCP option not found", __func__);
       return NF_DROP;
     }
-  assert (*authdata == TCPOPT_MD5);
-  
-  if (*(authdata + 1) != TCPMD5_OPT_SIZE)
-    {
-      zlog_warn ("%s: tcpmd5 option found but size wrong, %hhx", __func__,
-                 *(authdata + 1));
-      return NF_DROP;
-    }
-  else
-    authdata += 2; /* skip past tcp option kind and bytelen fields */
   
   tcph->check = 0;
   
