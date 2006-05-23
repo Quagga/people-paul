@@ -2,6 +2,7 @@ i pkginfo=$abs_builddir/pkginfo.daemons.full
 i depend=$abs_builddir/depend.daemons
 i copying=$abs_top_srcdir/COPYING
 d none @sbindir@=$DESTDIR/@sbindir@ 0755 root bin
+f none @sbindir@/quagga=$DESTDIR/@sbindir@/quagga 0755 root bin
 f none @sbindir@/zebra=$DESTDIR/@sbindir@/zebra 0755 root bin
 f none @sbindir@/bgpd=$DESTDIR/@sbindir@/bgpd 0755 root bin
 f none @sbindir@/ripd=$DESTDIR/@sbindir@/ripd 0755 root bin

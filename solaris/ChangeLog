@@ -1,3 +1,7 @@
+2006-05-23 Paul Jakma <paul.jakma@sun.com>
+
+	* prototype.daemons.in: Add the quagga command line tool
+
 2006-04-03 Paul Jakma <paul.jakma@sun.com>
 
 	* quagga.xml.in: oops, ipvX-routing services don't exist yet in
