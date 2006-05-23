@@ -402,6 +402,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_sbindir}/ospfd
 %{_sbindir}/ripd
 %{_sbindir}/bgpd
+%{_sbindir}/quagga
 %{_sbindir}/watchquagga
 %if %{with_ipv6}
 %{_sbindir}/ripngd
