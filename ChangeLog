@@ -1,3 +1,8 @@
+2006-05-23 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: Add tools/Makefile
+	* Makefile.am: tools stuff moves to tools/ automake file
+
 2006-05-10 Paul Jakma <paul.jakma@sun.com>
 
 	* configure.ac: Bump to 0.99.4

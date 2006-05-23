@@ -2,16 +2,14 @@
 
 SUBDIRS = lib @ZEBRA@ @BGPD@ @RIPD@ @RIPNGD@ @OSPFD@ @OSPF6D@ \
          @ISISD@ @WATCHQUAGGA@ @VTYSH@ @OSPFCLIENT@ doc m4 @pkgsrcdir@ \
-         redhat solaris
+         redhat solaris tools
 
 DIST_SUBDIRS = lib zebra bgpd ripd ripngd ospfd ospf6d \
 	  isisd watchquagga vtysh ospfclient doc m4 pkgsrc redhat tests \
-	  solaris
+	  solaris tools
 
 EXTRA_DIST = aclocal.m4 SERVICES TODO REPORTING-BUGS INSTALL.quagga.txt \
 	update-autotools \
-	vtysh/Makefile.in vtysh/Makefile.am \
-	tools/mrlg.cgi tools/rrcheck.pl tools/rrlookup.pl tools/zc.pl \
-	tools/zebra.el
+	vtysh/Makefile.in vtysh/Makefile.am
 
 ACLOCAL_AMFLAGS = -I m4

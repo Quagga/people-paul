@@ -1,0 +1,5 @@
+2006-05-23 Paul Jakma <paul.jakma@sun.com>
+
+	* quagga.c: First, rough, revision of a quagga command line tool
+	* Makefile.am: New file, quagga.c plus the EXTRA_DISTs which
+	  used to be in top-level automake file

@@ -1341,7 +1341,8 @@ AC_CONFIG_FILES([Makefile lib/Makefile zebra/Makefile ripd/Makefile
 	  ospf6d/Makefile isisd/Makefile vtysh/Makefile doc/Makefile 
 	  ospfclient/Makefile tests/Makefile m4/Makefile redhat/Makefile
 	  pkgsrc/Makefile
-	  redhat/quagga.spec 
+	  redhat/quagga.spec
+	  tools/Makefile
 	  lib/version.h
 	  doc/defines.texi
 	  isisd/topology/Makefile
