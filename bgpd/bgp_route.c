@@ -65,7 +65,11 @@ bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix
 {
   struct bgp_node *rn;
   struct bgp_node *prn = NULL;
-
+  
+  assert (table);
+  if (!table)
+    return NULL;
+  
   if (safi == SAFI_MPLS_VPN)
     {
       prn = bgp_node_get (table, (struct prefix *) prd);
@@ -2555,6 +2559,25 @@ bgp_clear_route_table (struct peer *peer, afi_t afi, safi_t safi,
   /* If still no table => afi/safi isn't configured at all or smth. */
   if (! table)
     return;
+  
+  for (rn = bgp_table_top (table); rn; rn = bgp_route_next (rn))
+    {
+      if (rn->info == NULL)
+        continue;
+      
+      bgp_lock_node (rn); /* unlocked: bgp_clear_node_queue_del */
+      work_queue_add (peer->clear_node_queue, rn);
+    }
+  return;
+}
+
+void
+bgp_clear_route (struct peer *peer, afi_t afi, safi_t safi)
+{
+  struct bgp_node *rn;
+  struct bgp_table *table;
+  struct peer *rsclient;
+  struct listnode *node, *nnode;
 
   if (peer->clear_node_queue == NULL)
     bgp_clear_node_queue_init (peer);
@@ -2576,25 +2599,6 @@ bgp_clear_route_table (struct peer *peer, afi_t afi, safi_t safi,
       peer_lock (peer); /* bgp_clear_node_complete */
     }
   
-  for (rn = bgp_table_top (table); rn; rn = bgp_route_next (rn))
-    {
-      if (rn->info == NULL)
-        continue;
-      
-      bgp_lock_node (rn); /* unlocked: bgp_clear_node_queue_del */
-      work_queue_add (peer->clear_node_queue, rn);
-    }
-  return;
-}
-
-void
-bgp_clear_route (struct peer *peer, afi_t afi, safi_t safi)
-{
-  struct bgp_node *rn;
-  struct bgp_table *table;
-  struct peer *rsclient;
-  struct listnode *node, *nnode;
-
   if (safi != SAFI_MPLS_VPN)
     bgp_clear_route_table (peer, afi, safi, NULL, NULL);
   else
@@ -2608,6 +2612,12 @@ bgp_clear_route (struct peer *peer, afi_t afi, safi_t safi)
       if (CHECK_FLAG(rsclient->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
         bgp_clear_route_table (peer, afi, safi, NULL, rsclient);
     }
+  
+  /* If no routes were cleared, nothing was added to workqueue, run the
+   * completion function now.
+   */
+  if (!peer->clear_node_queue->thread)
+    bgp_clear_node_complete (peer->clear_node_queue);
 }
   
 void
@@ -2927,15 +2937,17 @@ bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
 
   bgp = rsclient->bgp;
 
+  assert (bgp_static);
+  if (!bgp_static)
+    return;
+
   rn = bgp_afi_node_get (rsclient->rib[afi][safi], afi, safi, p, NULL);
 
   bgp_attr_default_set (&attr, BGP_ORIGIN_IGP);
-  if (bgp_static)
-    {
-      attr.nexthop = bgp_static->igpnexthop;
-      attr.med = bgp_static->igpmetric;
-      attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
-    }
+
+  attr.nexthop = bgp_static->igpnexthop;
+  attr.med = bgp_static->igpmetric;
+  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
 
   new_attr = attr;
 
@@ -3063,15 +3075,17 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
   struct attr *attr_new;
   int ret;
 
+  assert (bgp_static);
+  if (!bgp_static)
+    return;
+
   rn = bgp_afi_node_get (bgp->rib[afi][safi], afi, safi, p, NULL);
 
   bgp_attr_default_set (&attr, BGP_ORIGIN_IGP);
-  if (bgp_static)
-    {
-      attr.nexthop = bgp_static->igpnexthop;
-      attr.med = bgp_static->igpmetric;
-      attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
-    }
+  
+  attr.nexthop = bgp_static->igpnexthop;
+  attr.med = bgp_static->igpmetric;
+  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
 
   /* Apply route-map. */
   if (bgp_static->rmap.name)
@@ -3171,7 +3185,8 @@ bgp_static_update (struct bgp *bgp, struct prefix *p,
 
   for (ALL_LIST_ELEMENTS (bgp->rsclient, node, nnode, rsclient))
     {
-      bgp_static_update_rsclient (rsclient, p, bgp_static, afi, safi);
+      if (CHECK_FLAG (rsclient->af_flags[afi][safi], PEER_FLAG_RSERVER_CLIENT))
+        bgp_static_update_rsclient (rsclient, p, bgp_static, afi, safi);
     }
 }
 
@@ -5138,16 +5153,13 @@ route_vty_out (struct vty *vty, struct prefix *p,
 
       vty_out (vty, "%7u ",attr->weight);
     
-    /* Print aspath */
-    if (attr->aspath)
-      aspath_print_vty (vty, attr->aspath);
+      /* Print aspath */
+      if (attr->aspath)
+        aspath_print_vty (vty, "%s ", attr->aspath);
 
-    /* Print origin */
-    if (strlen (attr->aspath->str) == 0)
+      /* Print origin */
       vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-    else
-      vty_out (vty, " %s", bgp_origin_str[attr->origin]);
-  }
+    }
   vty_out (vty, "%s", VTY_NEWLINE);
 }  
 
@@ -5202,16 +5214,13 @@ route_vty_out_tmp (struct vty *vty, struct prefix *p,
 
       vty_out (vty, "%7d ",attr->weight);
     
-    /* Print aspath */
-    if (attr->aspath)
-      aspath_print_vty (vty, attr->aspath);
+      /* Print aspath */
+      if (attr->aspath)
+        aspath_print_vty (vty, "%s ", attr->aspath);
 
-    /* Print origin */
-    if (strlen (attr->aspath->str) == 0)
+      /* Print origin */
       vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-    else
-      vty_out (vty, " %s", bgp_origin_str[attr->origin]);
-  }
+    }
 
   vty_out (vty, "%s", VTY_NEWLINE);
 }  
@@ -5299,13 +5308,10 @@ damp_route_vty_out (struct vty *vty, struct prefix *p,
     {
       /* Print aspath */
       if (attr->aspath)
-	aspath_print_vty (vty, attr->aspath);
+	aspath_print_vty (vty, "%s ", attr->aspath);
 
       /* Print origin */
-      if (strlen (attr->aspath->str) == 0)
-	vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-      else
-	vty_out (vty, " %s", bgp_origin_str[attr->origin]);
+      vty_out (vty, "%s", bgp_origin_str[attr->origin]);
     }
   vty_out (vty, "%s", VTY_NEWLINE);
 }
@@ -5362,13 +5368,10 @@ flap_route_vty_out (struct vty *vty, struct prefix *p,
     {
       /* Print aspath */
       if (attr->aspath)
-	aspath_print_vty (vty, attr->aspath);
+	aspath_print_vty (vty, "%s ", attr->aspath);
 
       /* Print origin */
-      if (strlen (attr->aspath->str) == 0)
-	vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-      else
-	vty_out (vty, " %s", bgp_origin_str[attr->origin]);
+      vty_out (vty, "%s", bgp_origin_str[attr->origin]);
     }
   vty_out (vty, "%s", VTY_NEWLINE);
 }
@@ -5393,7 +5396,7 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
 	  if (aspath_count_hops (attr->aspath) == 0)
 	    vty_out (vty, "Local");
 	  else
-	    aspath_print_vty (vty, attr->aspath);
+	    aspath_print_vty (vty, "%s", attr->aspath);
 	}
 
       if (CHECK_FLAG (binfo->flags, BGP_INFO_REMOVED))

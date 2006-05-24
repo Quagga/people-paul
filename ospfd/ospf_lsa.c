@@ -2002,6 +2002,8 @@ ospf_translated_nssa_refresh (struct ospf *ospf, struct ospf_lsa *type7,
   
   /* Sanity checks. */
   assert (type7 || type5);
+  if (!(type7 || type5))
+    return NULL;
   if (type7)
     assert (type7->data);
   if (type5)
@@ -2055,7 +2057,7 @@ ospf_translated_nssa_refresh (struct ospf *ospf, struct ospf_lsa *type7,
       if (IS_DEBUG_OSPF_NSSA)
         zlog_debug ("ospf_translated_nssa_refresh(): no Type-7 found for "
                    "Type-5 LSA Id %s",
-                   inet_ntoa (type7->data->id));
+                   inet_ntoa (type5->data->id));
       return NULL;
     }
 
@@ -2243,22 +2245,18 @@ ospf_default_external_info (struct ospf *ospf)
 int
 ospf_default_originate_timer (struct thread *thread)
 {
-  int *origin;
   struct prefix_ipv4 p;
   struct in_addr nexthop;
   struct external_info *ei;
   struct ospf *ospf;
   
-  ospf = ospf_lookup ();
-
-  /* Get originate flags. */
-  origin = THREAD_ARG (thread);
+  ospf = THREAD_ARG (thread);
 
   p.family = AF_INET;
   p.prefix.s_addr = 0;
   p.prefixlen = 0;
 
-  if (*origin == DEFAULT_ORIGINATE_ALWAYS)
+  if (ospf->default_originate == DEFAULT_ORIGINATE_ALWAYS)
     {
       /* If there is no default route via redistribute,
 	 then originate AS-external-LSA with nexthop 0 (self). */
@@ -3619,18 +3617,13 @@ ospf_lsa_unique_id (struct ospf *ospf,
 }
 
 
-#define LSA_ACTION_ORIGN_RTR  1
-#define LSA_ACTION_ORIGN_NET  2
-#define LSA_ACTION_FLOOD_AREA 3
-#define LSA_ACTION_FLOOD_AS   4
-#define LSA_ACTION_FLUSH_AREA 5
-#define LSA_ACTION_FLUSH_AS   6
+#define LSA_ACTION_FLOOD_AREA 1
+#define LSA_ACTION_FLUSH_AREA 2
 
 struct lsa_action
 {
   u_char action;
   struct ospf_area *area;
-  struct ospf_interface *oi; 
   struct ospf_lsa *lsa;
 };
 
@@ -3638,9 +3631,6 @@ static int
 ospf_lsa_action (struct thread *t)
 {
   struct lsa_action *data;
-  struct ospf *ospf;
-
-  ospf = ospf_lookup ();
 
   data = THREAD_ARG (t);
 
@@ -3650,23 +3640,11 @@ ospf_lsa_action (struct thread *t)
 
   switch (data->action)
     {
-    case LSA_ACTION_ORIGN_RTR:
-      ospf_router_lsa_refresh (data->area->router_lsa_self);
-      break;
-    case LSA_ACTION_ORIGN_NET:
-      ospf_network_lsa_originate (data->oi);
-      break;
     case LSA_ACTION_FLOOD_AREA:
       ospf_flood_through_area (data->area, NULL, data->lsa);
       break;
-    case LSA_ACTION_FLOOD_AS:
-      ospf_flood_through_as (ospf, NULL, data->lsa);
-      break;
     case LSA_ACTION_FLUSH_AREA:
       ospf_lsa_flush_area (data->lsa, data->area);
-      break;
-    case LSA_ACTION_FLUSH_AS:
-      ospf_lsa_flush_as (ospf, data->lsa);
       break;
     }
 

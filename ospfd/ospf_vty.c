@@ -722,7 +722,7 @@ ospf_find_vl_data (struct ospf *ospf, struct ospf_vl_config_data *vl_config)
       return NULL;
     }
   
-  if ((vl_data = ospf_vl_lookup (area, vl_config->vl_peer)) == NULL)
+  if ((vl_data = ospf_vl_lookup (ospf, area, vl_config->vl_peer)) == NULL)
     {
       vl_data = ospf_vl_data_new (area, vl_config->vl_peer);
       if (vl_data->vl_oi == NULL)
@@ -1074,7 +1074,7 @@ DEFUN (no_ospf_area_vlink,
     {
       /* Basic VLink no command */
       /* Thats all folks! - BUGS B. strikes again!!!*/
-      if ((vl_data = ospf_vl_lookup (area, vl_config.vl_peer)))
+      if ((vl_data = ospf_vl_lookup (ospf, area, vl_config.vl_peer)))
 	ospf_vl_delete (ospf, vl_data);
 
       ospf_area_check_free (ospf, vl_config.area_id);
@@ -1896,7 +1896,9 @@ DEFUN (no_ospf_area_filter_list,
 
   VTY_GET_OSPF_AREA_ID (area_id, format, argv[0]);
 
-  area = ospf_area_lookup_by_area_id (ospf, area_id);
+  if ((area = ospf_area_lookup_by_area_id (ospf, area_id)) == NULL)
+    return CMD_SUCCESS;
+  
   plist = prefix_list_lookup (AFI_IP, argv[1]);
   if (strncmp (argv[2], "in", 2) == 0)
     {
@@ -2736,10 +2738,27 @@ show_ip_ospf_interface_sub (struct vty *vty, struct ospf *ospf,
       vty_out (vty, "  Internet Address %s/%d,",
 	       inet_ntoa (oi->address->u.prefix4), oi->address->prefixlen);
 
-      if (oi->connected->destination)
-	 vty_out (vty, " %s %s,",
-		  ((ifp->flags & IFF_POINTOPOINT) ? "Peer" : "Broadcast"),
-		  inet_ntoa (oi->connected->destination->u.prefix4));
+      if (oi->connected->destination || oi->type == OSPF_IFTYPE_VIRTUALLINK)
+        {
+          struct in_addr *dest;
+          const char *dstr;
+          
+          if ((ifp->flags & IFF_POINTOPOINT)
+              || oi->type == OSPF_IFTYPE_VIRTUALLINK)
+            dstr = "Peer";
+          else
+            dstr = "Broadcast";
+          
+          /* For Vlinks, showing the peer address is probably more
+           * informative than the local interface that is being used
+           */
+          if (oi->type == OSPF_IFTYPE_VIRTUALLINK)
+            dest = &oi->vl_data->peer_addr;
+          else
+            dest = &oi->connected->destination->u.prefix4;
+          
+	  vty_out (vty, " %s %s,", dstr, inet_ntoa (*dest));
+        }
 
       vty_out (vty, " Area %s%s", ospf_area_desc_string (oi->area),
 	       VTY_NEWLINE);
@@ -2843,6 +2862,11 @@ DEFUN (show_ip_ospf_interface,
   struct listnode *node;
 
   ospf = ospf_lookup ();
+  if (ospf == NULL)
+    {
+      vty_out (vty, "OSPF Routing Process not enabled%s", VTY_NEWLINE);
+      return CMD_SUCCESS;
+    }
 
   /* Show All Interfaces. */
   if (argc == 0)
@@ -3959,7 +3983,10 @@ DEFUN (show_ip_ospf_database,
 
   ospf = ospf_lookup ();
   if (ospf == NULL)
-    return CMD_SUCCESS;
+    {
+      vty_out (vty, " OSPF Routing Process not enabled%s", VTY_NEWLINE);
+      return CMD_SUCCESS;
+    }
 
   vty_out (vty, "%s       OSPF Router with ID (%s)%s%s", VTY_NEWLINE,
            inet_ntoa (ospf->router_id), VTY_NEWLINE, VTY_NEWLINE);
@@ -4097,7 +4124,10 @@ DEFUN (show_ip_ospf_database_type_adv_router,
 
   ospf = ospf_lookup ();
   if (ospf == NULL)
-    return CMD_SUCCESS;
+    {
+      vty_out (vty, " OSPF Routing Process not enabled%s", VTY_NEWLINE);
+      return CMD_SUCCESS;
+    }
 
   vty_out (vty, "%s       OSPF Router with ID (%s)%s%s", VTY_NEWLINE,
            inet_ntoa (ospf->router_id), VTY_NEWLINE, VTY_NEWLINE);
@@ -4719,10 +4749,7 @@ ospf_vty_dead_interval_set (struct vty *vty, const char *interval_str,
   struct ospf_if_params *params;
   struct ospf_interface *oi;
   struct route_node *rn;
-  struct ospf *ospf;
       
-  ospf = ospf_lookup ();
-
   params = IF_DEF_PARAMS (ifp);
   
   if (nbr_str)
@@ -4770,7 +4797,8 @@ ospf_vty_dead_interval_set (struct vty *vty, const char *interval_str,
   /* Update timer values in neighbor structure. */
   if (nbr_str)
     {
-      if (ospf)
+      struct ospf *ospf;
+      if ((ospf = ospf_lookup()))
 	{
 	  oi = ospf_if_lookup_by_local_addr (ospf, ifp, addr);
 	  if (oi)
@@ -4860,9 +4888,6 @@ DEFUN (no_ip_ospf_dead_interval,
   struct ospf_if_params *params;
   struct ospf_interface *oi;
   struct route_node *rn;
-  struct ospf *ospf;
-  
-  ospf = ospf_lookup ();
 
   ifp = vty->index;
   params = IF_DEF_PARAMS (ifp);
@@ -4897,7 +4922,9 @@ DEFUN (no_ip_ospf_dead_interval,
   /* Update timer values in neighbor structure. */
   if (argc == 1)
     {
-      if (ospf)
+      struct ospf *ospf;
+      
+      if ((ospf = ospf_lookup()))
 	{
 	  oi = ospf_if_lookup_by_local_addr (ospf, ifp, addr);
 	  if (oi)
@@ -7121,10 +7148,9 @@ DEFUN (show_ip_ospf_border_routers,
 {
   struct ospf *ospf;
 
-  ospf = ospf_lookup ();
-  if (ospf == NULL)
+  if ((ospf = ospf_lookup ()) == NULL)
     {
-      vty_out (vty, "OSPF is not enabled%s", VTY_NEWLINE);
+      vty_out (vty, " OSPF Routing Process not enabled%s", VTY_NEWLINE);
       return CMD_SUCCESS;
     }
 
@@ -7153,10 +7179,9 @@ DEFUN (show_ip_ospf_route,
 {
   struct ospf *ospf;
 
-  ospf = ospf_lookup ();
-  if (ospf == NULL)
+  if ((ospf = ospf_lookup ()) == NULL)
     {
-      vty_out (vty, "OSPF is not enabled%s", VTY_NEWLINE);
+      vty_out (vty, " OSPF Routing Process not enabled%s", VTY_NEWLINE);
       return CMD_SUCCESS;
     }
 
