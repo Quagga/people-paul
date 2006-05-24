@@ -195,9 +195,9 @@ ospf_route_delete_same_ext(struct route_table *external_routes,
           struct prefix_ipv4 *p = (struct prefix_ipv4 *)(&rn->p);
           if ( (ext_rn = route_node_lookup (external_routes, (struct prefix *)p)) )
             {
-              ospf_zebra_delete (p, ext_rn->info);
               if (ext_rn->info)
                 {
+                  ospf_zebra_delete (p, ext_rn->info);
                   ospf_route_free( ext_rn->info);
                   ext_rn->info = NULL;
                 }
@@ -343,8 +343,9 @@ ospf_intra_add_router (struct route_table *rt, struct vertex *v,
   if (IS_DEBUG_OSPF_EVENT)
     zlog_debug ("ospf_intra_add_router: LS ID: %s",
 	       inet_ntoa (lsa->header.id));
-
-  ospf_vl_up_check (area, lsa->header.id, v);
+  
+  if (!OSPF_IS_AREA_BACKBONE(area))
+    ospf_vl_up_check (area, lsa->header.id, v);
 
   if (!CHECK_FLAG (lsa->flags, ROUTER_LSA_SHORTCUT))
     area->shortcut_capability = 0;

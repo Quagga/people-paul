@@ -1441,7 +1441,7 @@ bgp_size_t
 bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
 		      struct stream *s, struct attr *attr, struct prefix *p,
 		      afi_t afi, safi_t safi, struct peer *from,
-		      struct prefix_rd *prd, char *tag)
+		      struct prefix_rd *prd, u_char *tag)
 {
   size_t cp;
   unsigned int aspath_data_size;
@@ -1598,14 +1598,9 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
       stream_putc (s, 4);
 
       if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ORIGINATOR_ID))
-        stream_put_in_addr (s, &attr->extra->originator_id);
-      else
-	{	  
-	  if (from)
-	    stream_put_in_addr (s, &from->remote_id);
-	  else
-	    stream_put_in_addr (s, &attr->extra->originator_id);
-	}
+	stream_put_in_addr (s, &attr->extra->originator_id);
+      else 
+        stream_put_in_addr (s, &from->remote_id);
 
       /* Cluster list. */
       stream_putc (s, BGP_ATTR_FLAG_OPTIONAL);
@@ -1806,7 +1801,7 @@ bgp_packet_attribute (struct bgp *bgp, struct peer *peer,
 bgp_size_t
 bgp_packet_withdraw (struct peer *peer, struct stream *s, struct prefix *p,
 		     afi_t afi, safi_t safi, struct prefix_rd *prd,
-		     char *tag)
+		     u_char *tag)
 {
   unsigned long cp;
   unsigned long attrlen_pnt;

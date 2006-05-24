@@ -1,3 +1,120 @@
+2006-05-13 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_lsa.c: (ospf_translated_nssa_refresh) fix the sanity
+	  check to match the assert, small error in CID #13 fix.
+
+2006-05-12 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_lsa.c: (ospf_lsa_action) Get rid of the ospf_lookup
+	  call, which is not checked for NULL return, by stripping out
+	  functionality which is never used, hence fixing Coverity CID
+	  #29.
+	  (struct lsa_action) remove unused member.
+	  (ospf_translated_nssa_refresh) Add non-assert sanity check,
+	  in case DEBUG isn't defined.
+	  Debug message when no type7 exists should print the ID from
+	  the type5, not the type7, fixes CID #13.
+ 	* ospf_interface.c: (ospf_if_exists) Fix missing NULL return
+	  check on ospf_lookup, CID #27.
+	* ospf_asbr.c: (ospf_redistribute_withdraw) remove ospf_lookup
+	  call by taking the struct ospf * as argument, which the
+	  caller has, fixing CID #28.
+	* ospf_asbr.h: (ospf_redistribute_withdraw) update declaration
+	* ospf_zebra.c: (ospf_redistribute_unset) update call to
+	  ospf_redistribute_withdraw to match.
+	* ospf_ia.c: (ospf_update_router_route) ospf->backbone could be
+	  NULL when passed to ospf_find_asbr_route_through_area,
+	  check for NULL first, CID #14.
+	* ospf_ism.c: (ism_change_state) NULL check on oi->area is
+	  useless, it's always valid. Only possibility where it
+ 	  couldn't be is if there is a race between abr_task and
+	  cleaning up oi's, in which case a NULL check here isn't going
+	  to do anything. Fixes CID #15.
+
+2006-05-11 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_vty.c: (general) Audit ospf_lookup calls in commands,
+	  ensure check for NULL result, make vty messages consistent. 
+	  (show_ip_ospf_interface) Missing NULL check on ospf_lookup
+	  result, fixes Coverity CID #70.
+	  (no_ospf_area_filter_list) Check NULL result from
+	  ospf_area_lookup_by_area_id, fixes Coverity CID #69
+	* ospf_route.c: (ospf_route_delete_same_ext) Fix deref before
+	  NULL check by moving into check-protected block, fix CID #49.
+	* ospf_abr.c: (ospf_area_range_cost_set) Shouldn't create a new
+	  range, should just lookup to see if one exists, the new range
+	  is just leaked. Fixes CID #46.
+	* ospf_lsa.c: (ospf_default_originate_timer) Let the thread
+	  take (struct ospf *) as thread argument, rather than (struct
+	  ospf *)->default_originate, thus avoiding having to call
+	  ospf_lookup.
+	* ospf_zebra.c: (ospf_redistribute_default_set) change setup
+	  of ospf_default_originate_timer thread to match.
+	* ospfd.c: (ospf_router_id_update) ditto.
+
+2006-04-24 Paul Jakma <paul.jakma@sun.com>
+
+	* (general) More Virtual-link fixes, again with much help in
+	  testing / debug from Juergen Kammer. Primarily in SPF.
+	* ospf_spf.h: Add guard. ospf_interface.h will include this
+	  header.
+	* ospf_interface.h: Modify ospf_vl_lookup definition to take
+	  struct ospf as argument, so as to allow for NULL area
+	  argument.
+	  (struct ospf_vl_data) Remove out_oi, instead add a struct
+	  vertex_nexthop, to use as initial nexthop for backbone paths
+	  through a vlink.
+	* ospf_interface.c: (ospf_vl_lookup) Modified to allow
+	  NULL area to be passed to indicate "any" (first) area.
+	  Add extra debug.
+	  (ospf_vl_set_params) vl_oi -> nexthop. Add extra debug.
+	  (ospf_vl_up_check) Fix debug, inet_ntoa returns a static
+	  buffer..
+	* ospf_route.c: (ospf_intra_add_router) Vlinks dont go through
+	  backbone, don't bother checking.
+	* ospf_spf.c: (static struct list vertex_list) Record vertices
+	  that will need to be freed.
+	  (cmp) Order network before router vertices, as required,
+	  wasn't implemented.
+	  (vertex_nexthop_free) Mild additional robustness check.
+	  (vertex_parent_free) Take void argument, as this function
+	  is passed as list deconstructor for vertex parent list.
+	  (ospf_vertex_new) More debug. Set deconstructor for parent
+	  list. Track allocated vertices on the vertex_list.
+	  (ospf_vertex_free) Get rid of the tricky recursive cleanup of
+	  vertices. Now frees only the given vertex. 
+	  (ospf_vertex_add_parent) Fix assert.
+	  (ospf_nexthop_calculation) Fix calculation of nexthop for
+	  VLink vertices, lookup the vl_data and use its previously
+	  recorded nexthop information.
+	  (ospf_spf_calculate) Vertices are freed simply by deleting
+	  vertex_list nodes and letting ospf_vertex_free as deconstructor
+	  work per-node.
+	  (ospf_spf_calculate_timer) Trivial optimisation, leave
+	  backbone SPF calculation till last to reduce SPF churn on
+	  VLink updates.
+	* ospf_vty.c: (ospf_find_vl_data) update call to ospf_vl_lookup
+	  (no_ospf_area_vlink_cmd) ditto.
+	  (show_ip_ospf_interface_sub) For Vlinks, the peer address is
+	  more interesting than the output interface.
+
+2006-04-03 Paul Jakma <paul.jakma@sun.com>
+
+	* (general) Fix issues with handling of Vlinks and entries
+	  in the nbrs route-table which were highlighted by the
+	  nsm/nbr_self fixes from bug #234. Many thanks to Juergen
+	  Kammer for his help and efforts in testing out debug patches to
+	  pinpoint the issue.
+	* ospf_interface.c: (ospf_vl_new) Add nbr_self for Vlink.
+	* ospf_neighbor.c: (ospf_nbr_key) new static function, helper
+	  to create key in nbrs table for a given nbr.
+	  (ospf_nbr_delete) Use ospf_nbr_key. Add an assert() to
+	  document an expected state.
+	  (ospf_nbr_add_self) Ditto.
+	  (ospf_nbr_lookup_by_addr) Add an assert.
+	* ospf_nsm.c: (nsm_kill_nbr) Can never kill the nbr_self
+	  psuedo-neighbour.
+
 2006-03-27 Paul Jakma <paul.jakma@sun.com>
 
 	* ospf_lsa.c: (ospf_lsa_checksum) Add an explicit cast to avoid

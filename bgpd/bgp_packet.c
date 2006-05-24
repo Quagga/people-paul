@@ -150,8 +150,6 @@ bgp_update_packet (struct peer *peer, afi_t afi, safi_t safi)
   bgp_size_t total_attr_len = 0;
   unsigned long pos;
   char buf[BUFSIZ];
-  struct prefix_rd *prd = NULL;
-  unsigned char *tag = NULL;
 
   s = peer->work;
   stream_reset (s);
@@ -165,10 +163,6 @@ bgp_update_packet (struct peer *peer, afi_t afi, safi_t safi)
       adj = adv->adj;
       if (adv->binfo)
         binfo = adv->binfo;
-      if (rn)
-        prd = (struct prefix_rd *) &rn->prn->p;
-      if (binfo && binfo->extra)
-        tag = binfo->extra->tag;
 
       /* When remaining space can't include NLRI and it's length.  */
       if (rn && STREAM_REMAIN (s) <= BGP_NLRI_LENGTH + PSIZE (rn->p.prefixlen))
@@ -177,6 +171,14 @@ bgp_update_packet (struct peer *peer, afi_t afi, safi_t safi)
       /* If packet is empty, set attribute. */
       if (stream_empty (s))
 	{
+	  struct prefix_rd *prd = NULL;
+	  u_char *tag = NULL;
+	  
+	  if (rn->prn)
+	    prd = (struct prefix_rd *) &rn->prn->p;
+          if (binfo && binfo->extra)
+            tag = binfo->extra->tag;
+          
 	  bgp_packet_set_marker (s, BGP_MSG_UPDATE);
 	  stream_putw (s, 0);		
 	  pos = stream_get_endp (s);
@@ -280,7 +282,6 @@ bgp_withdraw_packet (struct peer *peer, afi_t afi, safi_t safi)
   bgp_size_t unfeasible_len;
   bgp_size_t total_attr_len;
   char buf[BUFSIZ];
-  struct prefix_rd *prd = NULL;
 
   s = peer->work;
   stream_reset (s);
@@ -289,7 +290,6 @@ bgp_withdraw_packet (struct peer *peer, afi_t afi, safi_t safi)
     {
       adj = adv->adj;
       rn = adv->rn;
-      prd = (struct prefix_rd *) &rn->prn->p;
 
       if (STREAM_REMAIN (s) 
 	  < (BGP_NLRI_LENGTH + BGP_TOTAL_ATTR_LEN + PSIZE (rn->p.prefixlen)))
@@ -305,6 +305,10 @@ bgp_withdraw_packet (struct peer *peer, afi_t afi, safi_t safi)
 	stream_put_prefix (s, &rn->p);
       else
 	{
+	  struct prefix_rd *prd = NULL;
+	  
+	  if (rn->prn)
+	    prd = (struct prefix_rd *) &rn->prn->p;
 	  pos = stream_get_endp (s);
 	  stream_putw (s, 0);
 	  total_attr_len
