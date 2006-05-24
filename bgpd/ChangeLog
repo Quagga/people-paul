@@ -1,3 +1,56 @@
+2006-05-23 Paul Jakma <paul.jakma@sun.com>
+
+	* bgp_vty.c: (neighbor_update_source_cmd) Expand tab completion
+	  to make it clear it takes both address and ifname.
+
+2006-05-12 Paul Jakma <paul.jakma@sun.com>
+
+	* bgp_attr.c: (bgp_packet_attribute) Remove dead code, Coverity
+	  CID #1
+	* bgp_aspath.{c,h}: (aspath_print_vty) take a format string,
+	  so as to reduce burden on callers, all in bgp_route.c
+	* bgp_route.c: (bgp_static_update_main) Remove useless NULL
+	  check, code already assumes bgp_static can not be NULL, 
+	  fixes CID #7.
+	  (bgp_static_update_rsclient) ditto, CID #6
+	  (route_vty_out{,tmp}) Update to match aspath_print_vty,
+	  simplifying checks needed to get spacing right. CID #4,#5.
+	  ({damp,flap}_route_vty_out) Ditto, CID #9, #10
+
+2006-05-08 Paul Jakma <paul.jakma@sun.com>
+
+	* bgp_community.c: (community_str2com) Coverity CID#62, fix
+	  double-free, use-after-free.
+	* bgp_route.c: (bgp_afi_node_get) given table should never be
+	  NULL, check/assert this.
+	  (bgp_static_update) Bug #240. Rsclients should only be passed
+	  the static update if they are configured for the afi,safi.
+
+2006-05-04 Paul Jakma <paul.jakma@sun.com>
+
+	* (general) VPNv4 fixes. Certain VPNv4 code was not enabled.
+	  See bug #210.
+	* bgp_attr.{c,h}: (bgp_packet_{withdraw,attribute}) Tag should be
+	  u_char really.
+	* bgp_packet.c: (bgp_{update,withdraw}_packet) Enable some
+	  VPNv4 code which inexplicably was ifdef'd out. comments from
+	  a tester on IRC suggest this fixes bug #210.
+	* bgp_route.c: (general) Fix logical bug in clearing, noted
+	  by Chris Caputo in [quagga-users 6728] - clearing depended on
+	  at least one route being added to workqueue, in order for
+	  workqueue completion function to restart FSM. However, if no
+	  routes are cleared, then the completion function never is
+	  called, it needs to be called manually if the workqueue
+	  didn't get scheduled. 
+	  Finally, clearing is per-peer-session, not per AFI/SAFI, so
+	  the FSM synchronisation should be in bgp_clear_route_table.
+	  (bgp_clear_route_table) Wrong place for FSM/clearing
+	  synchronisation, move to..
+	  (bgp_clear_route) FSM/clearing synchronisation should be
+	  here.
+	  If no routes were cleared, no workqueue scheduled, call
+	  the completion func to ensure FSM kicks off again.
+
 2006-03-30 Paul Jakma <paul.jakma@sun.com>
 
 	* bgp_community.c: (community_gettoken) Unknown token should
