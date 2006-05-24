@@ -59,6 +59,7 @@ ospf6_as_external_lsa_originate (struct ospf6_route *route)
   char buffer[OSPF6_MAX_LSASIZE];
   struct ospf6_lsa_header *lsa_header;
   struct ospf6_lsa *old, *lsa;
+  struct ospf6_external_info *info = route->route_option;
 
   struct ospf6_as_external_lsa *as_external_lsa;
   char buf[64];
@@ -91,7 +92,7 @@ ospf6_as_external_lsa_originate (struct ospf6_route *route)
     UNSET_FLAG (as_external_lsa->bits_metric, OSPF6_ASBR_BIT_E);
 
   /* forwarding address */
-  if (! IN6_IS_ADDR_UNSPECIFIED (&route->nexthop[0].address))
+  if (! IN6_IS_ADDR_UNSPECIFIED (&info->forwarding))
     SET_FLAG (as_external_lsa->bits_metric, OSPF6_ASBR_BIT_F);
   else
     UNSET_FLAG (as_external_lsa->bits_metric, OSPF6_ASBR_BIT_F);
@@ -120,7 +121,7 @@ ospf6_as_external_lsa_originate (struct ospf6_route *route)
   /* Forwarding address */
   if (CHECK_FLAG (as_external_lsa->bits_metric, OSPF6_ASBR_BIT_F))
     {
-      memcpy (p, &route->nexthop[0].address, sizeof (struct in6_addr));
+      memcpy (p, &info->forwarding, sizeof (struct in6_addr));
       p += sizeof (struct in6_addr);
     }
 
@@ -294,45 +295,43 @@ ospf6_asbr_lsa_remove (struct ospf6_lsa *lsa)
 void
 ospf6_asbr_lsentry_add (struct ospf6_route *asbr_entry)
 {
-  char buf[64];
   struct ospf6_lsa *lsa;
   u_int16_t type;
   u_int32_t router;
 
-  if (IS_OSPF6_DEBUG_EXAMIN (AS_EXTERNAL))
+  if (! CHECK_FLAG (asbr_entry->flag, OSPF6_ROUTE_BEST))
     {
-      ospf6_linkstate_prefix2str (&asbr_entry->prefix, buf, sizeof (buf));
-      zlog_debug ("New ASBR %s found", buf);
+      char buf[16];
+      inet_ntop (AF_INET, &ADV_ROUTER_IN_PREFIX (&asbr_entry->prefix),
+                 buf, sizeof (buf));
+       zlog_info ("ignore non-best path: lsentry %s add", buf);
+      return;
     }
 
   type = htons (OSPF6_LSTYPE_AS_EXTERNAL);
   router = ospf6_linkstate_prefix_adv_router (&asbr_entry->prefix);
-  for (lsa = ospf6_lsdb_type_router_head (type, router, ospf6->lsdb);
-       lsa; lsa = ospf6_lsdb_type_router_next (type, router, lsa))
+  for (lsa = ospf6_lsdb_type_router_head (type, router, ospf6->lsdb); lsa;
+       lsa = ospf6_lsdb_type_router_next (type, router, lsa))
     {
       if (! OSPF6_LSA_IS_MAXAGE (lsa))
         ospf6_asbr_lsa_add (lsa);
-    }
-
-  if (IS_OSPF6_DEBUG_EXAMIN (AS_EXTERNAL))
-    {
-      ospf6_linkstate_prefix2str (&asbr_entry->prefix, buf, sizeof (buf));
-      zlog_debug ("Calculation for new ASBR %s done", buf);
     }
 }
 
 void
 ospf6_asbr_lsentry_remove (struct ospf6_route *asbr_entry)
 {
-  char buf[64];
   struct ospf6_lsa *lsa;
   u_int16_t type;
   u_int32_t router;
 
-  if (IS_OSPF6_DEBUG_EXAMIN (AS_EXTERNAL))
+  if (! CHECK_FLAG (asbr_entry->flag, OSPF6_ROUTE_BEST))  
     {
-      ospf6_linkstate_prefix2str (&asbr_entry->prefix, buf, sizeof (buf));
-      zlog_debug ("ASBR %s disappeared", buf);
+      char buf[16];
+      inet_ntop (AF_INET, &ADV_ROUTER_IN_PREFIX (&asbr_entry->prefix),
+                 buf, sizeof (buf));
+      zlog_info ("ignore non-best path: lsentry %s remove", buf);
+      return;
     }
 
   type = htons (OSPF6_LSTYPE_AS_EXTERNAL);
@@ -340,12 +339,6 @@ ospf6_asbr_lsentry_remove (struct ospf6_route *asbr_entry)
   for (lsa = ospf6_lsdb_type_router_head (type, router, ospf6->lsdb);
        lsa; lsa = ospf6_lsdb_type_router_next (type, router, lsa))
     ospf6_asbr_lsa_remove (lsa);
-
-  if (IS_OSPF6_DEBUG_EXAMIN (AS_EXTERNAL))
-    {
-      ospf6_linkstate_prefix2str (&asbr_entry->prefix, buf, sizeof (buf));
-      zlog_debug ("Calculation for old ASBR %s done", buf);
-    }
 }
 
 

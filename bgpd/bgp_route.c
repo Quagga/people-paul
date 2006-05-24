@@ -2937,15 +2937,17 @@ bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
 
   bgp = rsclient->bgp;
 
+  assert (bgp_static);
+  if (!bgp_static)
+    return;
+
   rn = bgp_afi_node_get (rsclient->rib[afi][safi], afi, safi, p, NULL);
 
   bgp_attr_default_set (&attr, BGP_ORIGIN_IGP);
-  if (bgp_static)
-    {
-      attr.nexthop = bgp_static->igpnexthop;
-      attr.med = bgp_static->igpmetric;
-      attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
-    }
+
+  attr.nexthop = bgp_static->igpnexthop;
+  attr.med = bgp_static->igpmetric;
+  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
 
   new_attr = attr;
 
@@ -3073,15 +3075,17 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
   struct attr *attr_new;
   int ret;
 
+  assert (bgp_static);
+  if (!bgp_static)
+    return;
+
   rn = bgp_afi_node_get (bgp->rib[afi][safi], afi, safi, p, NULL);
 
   bgp_attr_default_set (&attr, BGP_ORIGIN_IGP);
-  if (bgp_static)
-    {
-      attr.nexthop = bgp_static->igpnexthop;
-      attr.med = bgp_static->igpmetric;
-      attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
-    }
+  
+  attr.nexthop = bgp_static->igpnexthop;
+  attr.med = bgp_static->igpmetric;
+  attr.flag |= ATTR_FLAG_BIT (BGP_ATTR_MULTI_EXIT_DISC);
 
   /* Apply route-map. */
   if (bgp_static->rmap.name)
@@ -5149,16 +5153,13 @@ route_vty_out (struct vty *vty, struct prefix *p,
 
       vty_out (vty, "%7u ",attr->weight);
     
-    /* Print aspath */
-    if (attr->aspath)
-      aspath_print_vty (vty, attr->aspath);
+      /* Print aspath */
+      if (attr->aspath)
+        aspath_print_vty (vty, "%s ", attr->aspath);
 
-    /* Print origin */
-    if (strlen (attr->aspath->str) == 0)
+      /* Print origin */
       vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-    else
-      vty_out (vty, " %s", bgp_origin_str[attr->origin]);
-  }
+    }
   vty_out (vty, "%s", VTY_NEWLINE);
 }  
 
@@ -5213,16 +5214,13 @@ route_vty_out_tmp (struct vty *vty, struct prefix *p,
 
       vty_out (vty, "%7d ",attr->weight);
     
-    /* Print aspath */
-    if (attr->aspath)
-      aspath_print_vty (vty, attr->aspath);
+      /* Print aspath */
+      if (attr->aspath)
+        aspath_print_vty (vty, "%s ", attr->aspath);
 
-    /* Print origin */
-    if (strlen (attr->aspath->str) == 0)
+      /* Print origin */
       vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-    else
-      vty_out (vty, " %s", bgp_origin_str[attr->origin]);
-  }
+    }
 
   vty_out (vty, "%s", VTY_NEWLINE);
 }  
@@ -5310,13 +5308,10 @@ damp_route_vty_out (struct vty *vty, struct prefix *p,
     {
       /* Print aspath */
       if (attr->aspath)
-	aspath_print_vty (vty, attr->aspath);
+	aspath_print_vty (vty, "%s ", attr->aspath);
 
       /* Print origin */
-      if (strlen (attr->aspath->str) == 0)
-	vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-      else
-	vty_out (vty, " %s", bgp_origin_str[attr->origin]);
+      vty_out (vty, "%s", bgp_origin_str[attr->origin]);
     }
   vty_out (vty, "%s", VTY_NEWLINE);
 }
@@ -5373,13 +5368,10 @@ flap_route_vty_out (struct vty *vty, struct prefix *p,
     {
       /* Print aspath */
       if (attr->aspath)
-	aspath_print_vty (vty, attr->aspath);
+	aspath_print_vty (vty, "%s ", attr->aspath);
 
       /* Print origin */
-      if (strlen (attr->aspath->str) == 0)
-	vty_out (vty, "%s", bgp_origin_str[attr->origin]);
-      else
-	vty_out (vty, " %s", bgp_origin_str[attr->origin]);
+      vty_out (vty, "%s", bgp_origin_str[attr->origin]);
     }
   vty_out (vty, "%s", VTY_NEWLINE);
 }
@@ -5404,7 +5396,7 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
 	  if (aspath_count_hops (attr->aspath) == 0)
 	    vty_out (vty, "Local");
 	  else
-	    aspath_print_vty (vty, attr->aspath);
+	    aspath_print_vty (vty, "%s", attr->aspath);
 	}
 
       if (CHECK_FLAG (binfo->flags, BGP_INFO_REMOVED))

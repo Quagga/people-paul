@@ -1,3 +1,57 @@
+2006-05-13 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_lsa.c: (ospf_translated_nssa_refresh) fix the sanity
+	  check to match the assert, small error in CID #13 fix.
+
+2006-05-12 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_lsa.c: (ospf_lsa_action) Get rid of the ospf_lookup
+	  call, which is not checked for NULL return, by stripping out
+	  functionality which is never used, hence fixing Coverity CID
+	  #29.
+	  (struct lsa_action) remove unused member.
+	  (ospf_translated_nssa_refresh) Add non-assert sanity check,
+	  in case DEBUG isn't defined.
+	  Debug message when no type7 exists should print the ID from
+	  the type5, not the type7, fixes CID #13.
+ 	* ospf_interface.c: (ospf_if_exists) Fix missing NULL return
+	  check on ospf_lookup, CID #27.
+	* ospf_asbr.c: (ospf_redistribute_withdraw) remove ospf_lookup
+	  call by taking the struct ospf * as argument, which the
+	  caller has, fixing CID #28.
+	* ospf_asbr.h: (ospf_redistribute_withdraw) update declaration
+	* ospf_zebra.c: (ospf_redistribute_unset) update call to
+	  ospf_redistribute_withdraw to match.
+	* ospf_ia.c: (ospf_update_router_route) ospf->backbone could be
+	  NULL when passed to ospf_find_asbr_route_through_area,
+	  check for NULL first, CID #14.
+	* ospf_ism.c: (ism_change_state) NULL check on oi->area is
+	  useless, it's always valid. Only possibility where it
+ 	  couldn't be is if there is a race between abr_task and
+	  cleaning up oi's, in which case a NULL check here isn't going
+	  to do anything. Fixes CID #15.
+
+2006-05-11 Paul Jakma <paul.jakma@sun.com>
+
+	* ospf_vty.c: (general) Audit ospf_lookup calls in commands,
+	  ensure check for NULL result, make vty messages consistent. 
+	  (show_ip_ospf_interface) Missing NULL check on ospf_lookup
+	  result, fixes Coverity CID #70.
+	  (no_ospf_area_filter_list) Check NULL result from
+	  ospf_area_lookup_by_area_id, fixes Coverity CID #69
+	* ospf_route.c: (ospf_route_delete_same_ext) Fix deref before
+	  NULL check by moving into check-protected block, fix CID #49.
+	* ospf_abr.c: (ospf_area_range_cost_set) Shouldn't create a new
+	  range, should just lookup to see if one exists, the new range
+	  is just leaked. Fixes CID #46.
+	* ospf_lsa.c: (ospf_default_originate_timer) Let the thread
+	  take (struct ospf *) as thread argument, rather than (struct
+	  ospf *)->default_originate, thus avoiding having to call
+	  ospf_lookup.
+	* ospf_zebra.c: (ospf_redistribute_default_set) change setup
+	  of ospf_default_originate_timer thread to match.
+	* ospfd.c: (ospf_router_id_update) ditto.
+
 2006-04-24 Paul Jakma <paul.jakma@sun.com>
 
 	* (general) More Virtual-link fixes, again with much help in
