@@ -1,3 +1,9 @@
+2006-05-24 Paul Jakma <paul.jakma@sun.com>
+
+	* bgp_route.c: (bgp_info_free) move the extra-info stuff to
+	  bgp_info_extra_free, call it instead.
+	  (bgp_info_extra_free) Free damp info, as per previous.
+
 2006-05-23 Paul Jakma <paul.jakma@sun.com>
 
 	* bgp_vty.c: (neighbor_update_source_cmd) Expand tab completion

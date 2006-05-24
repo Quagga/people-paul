@@ -99,9 +99,19 @@ bgp_info_extra_new (void)
 }
 
 static void
-bgp_info_extra_free (struct bgp_info_extra *extra)
+bgp_info_extra_free (struct bgp_info_extra **extra)
 {
-  XFREE (MTYPE_BGP_ROUTE_EXTRA, extra);
+  if (extra && *extra)
+    {
+      if ((*extra)->damp_info)
+        bgp_damp_info_free ((*extra)->damp_info, 0);
+      
+      (*extra)->damp_info = NULL;
+      
+      XFREE (MTYPE_BGP_ROUTE_EXTRA, *extra);
+      
+      *extra = NULL;
+    }
 }
 
 /* Get bgp_info extra information for the given bgp_info, lazy allocated
@@ -133,15 +143,9 @@ bgp_info_free (struct bgp_info *binfo)
 {
   if (binfo->attr)
     bgp_attr_unintern (binfo->attr);
-    
-  if (binfo->extra)
-    {
-      if (binfo->extra->damp_info)
-        bgp_damp_info_free (binfo->extra->damp_info, 0);
-      
-      XFREE (MTYPE_BGP_ROUTE_EXTRA, binfo->extra);
-    }
   
+  bgp_info_extra_free (&binfo->extra);
+
   peer_unlock (binfo->peer); /* bgp_info peer reference */
 
   XFREE (MTYPE_BGP_ROUTE, binfo);
