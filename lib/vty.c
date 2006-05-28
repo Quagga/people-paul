@@ -2406,6 +2406,9 @@ vty_log (const char *level, const char *proto_str,
 {
   unsigned int i;
   struct vty *vty;
+  
+  if (!vtyvec)
+    return;
 
   for (i = 0; i < vector_active (vtyvec); i++)
     if ((vty = vector_slot (vtyvec, i)) != NULL)
@@ -2425,6 +2428,10 @@ vty_log_fixed (const char *buf, size_t len)
   unsigned int i;
   struct iovec iov[2];
 
+  /* vty may not have been initialised */
+  if (!vtyvec)
+    return;
+  
   iov[0].iov_base = (void *)buf;
   iov[0].iov_len = len;
   iov[1].iov_base = (void *)"\r\n";
