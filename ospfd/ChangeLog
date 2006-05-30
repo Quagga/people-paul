@@ -1,3 +1,34 @@
+2006-05-30 Paul Jakma <paul.jakma@sun.com>
+
+	* (general) Fix confusion around MaxAge-ing and problem with
+	  high-latency networks. Analysis and suggested fixes by
+	  Phillip Spagnolo, in [quagga-dev 4132], on which this commit
+	  expands slightly.
+	* ospf_flood.{c,h}: (ospf_lsa_flush) new function.
+	  Scope-general form of existing flush functions, essentially
+	  the dormant ospf_maxage_flood() but without the ambiguity of
+	  whether it is responsible for flooding.
+	* ospf_lsa.c: (ospf_lsa_maxage) Role minimised to simply setup
+	  LSA on the Maxage list and schedule removal - no more.
+	  ospf_lsa_flush* being the primary way to kick-off flushes
+	  of LSAs.
+	  Don't hardcode the remover-timer value, which was too
+	  short for very high-latency networks.
+	  (ospf_maxage_lsa_remover) Just do what needs to be done to
+	  remove maxage LSAs from the maxage list, remove the call
+	  to ospf_flood_through().
+	  Don't hardcode remove-timer value.
+	  (ospf_lsa_{install,flush_schedule}) ospf_lsa_flush is the correct
+	  (lsa_header_set) Use a define for the initial age, useful for
+	  testing.
+	  entrypoint to flushing maxaged LSAs.
+	* ospf_opaque.c: (ospf_opaque_lsa_refresh) ditto.
+	  (ospf_opaque_lsa_flush_schedule) ditto.
+	* ospfd.h: ({struct ospf,ospf_new}) Add maxage_delay parameter,
+	  interval to wait before running the maxage_remover. Supply a
+	  suitable default.
+	  Add a define for OSPF_LSA_INITIAL_AGE, see lsa_header_set().
+
 2006-05-13 Paul Jakma <paul.jakma@sun.com>
 
 	* ospf_lsa.c: (ospf_translated_nssa_refresh) fix the sanity
