@@ -1035,17 +1035,14 @@ ospf_db_desc_proc (struct stream *s, struct ospf_interface *oi,
       /* Lookup received LSA, then add LS request list. */
       find = ospf_lsa_lookup_by_header (oi->area, lsah);
       if (!find || ospf_lsa_more_recent (find, new) < 0)
-	{
-	  ospf_ls_request_add (nbr, new);
-	  ospf_lsa_discard (new);
-	}
+        ospf_ls_request_add (nbr, new); /* *Always* adds LSA to LSDB */
       else
 	{
 	  /* Received LSA is not recent. */
 	  if (IS_DEBUG_OSPF_EVENT)
 	    zlog_debug ("Packet [DD:RECV]: LSA received Type %d, "
 		       "ID %s is not recent.", lsah->type, inet_ntoa (lsah->id));
-	  ospf_lsa_discard (new);
+	  ospf_lsa_free (new);
 	  continue;
 	}
     }
@@ -1577,7 +1574,7 @@ ospf_ls_upd_list_lsa (struct ospf_neighbor *nbr, struct stream *s,
       if (IS_DEBUG_OSPF_EVENT)
 	zlog_debug("LSA[Type%d:%s]: %p new LSA created with Link State Update",
 		  lsa->data->type, inet_ntoa (lsa->data->id), lsa);
-      listnode_add (lsas, lsa);
+      listnode_add (lsas, ospf_lsa_lock (lsa)); /* ospf_ls_upd_list_lsa tmp list */
     }
 
   return lsas;
@@ -1591,7 +1588,7 @@ ospf_upd_list_clean (struct list *lsas)
   struct ospf_lsa *lsa;
 
   for (ALL_LIST_ELEMENTS (lsas, node, nnode, lsa))
-    ospf_lsa_discard (lsa);
+    ospf_lsa_unlock (&lsa); /* ospf_ls_upd_list_lsa tmp list */
 
   list_delete (lsas);
 }
@@ -1652,19 +1649,30 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
    ospf_opaque_adjust_lsreq (nbr, lsas);
 #endif /* HAVE_OPAQUE_LSA */
 
-#define DISCARD_LSA(L,N) {\
+#define LSA_DONE(L,R) {\
         if (IS_DEBUG_OSPF_EVENT) \
-          zlog_debug ("ospf_lsa_discard() in ospf_ls_upd() point %d: lsa %p Type-%d", N, lsa, (int) lsa->data->type); \
-        ospf_lsa_discard (L); \
-	continue; }
+          zlog_debug ("%s: lsa %p, result: %s", __func__, (L), (R)); \
+        list_delete_node (lsas, node); \
+        ospf_lsa_unlock (&(L)); /* ospf_ls_upd_list_lsa tmp list */ \
+	continue;\
+      }
 
-  /* Process each LSA received in the one packet. */
+  /* Process each LSA received in the one packet.
+   *
+   * Each LSA is new, but locked once by ospf_ls_upd_list_lsa.
+   * Each loop iteration *must* end by unlocking the LSA, preferably
+   * by using LSA_DONE (which also provides some useful debug output).
+   * 
+   * If any called functions store a reference to the LSA being
+   * considered, obviously it is that functions responsibility to
+   * increment the refcount.  (ie 'lock').
+   */
   for (ALL_LIST_ELEMENTS (lsas, node, nnode, lsa))
     {
       struct ospf_lsa *ls_ret, *current;
       int ret = 1;
 
-      if (IS_DEBUG_OSPF_NSSA)
+      if (IS_DEBUG_OSPF_EVENT)
 	{
 	  char buf1[INET_ADDRSTRLEN];
 	  char buf2[INET_ADDRSTRLEN];
@@ -1680,7 +1688,6 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
 			     buf3, INET_ADDRSTRLEN));
 	}
 
-      listnode_delete (lsas, lsa); /* We don't need it in list anymore */
 
       /* Validate Checksum - Done above by ospf_ls_upd_list_lsa() */
 
@@ -1701,17 +1708,17 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
         /* Reject from STUB or NSSA */
         if (nbr->oi->area->external_routing != OSPF_AREA_DEFAULT) 
 	  {
-	    DISCARD_LSA (lsa, 1);
 	    if (IS_DEBUG_OSPF_NSSA)
 	      zlog_debug("Incoming External LSA Discarded: We are NSSA/STUB Area");
+	    LSA_DONE (lsa, "Discarded, area not external capable");
 	  }
 
       if (lsa->data->type == OSPF_AS_NSSA_LSA)
 	if (nbr->oi->area->external_routing != OSPF_AREA_NSSA)
 	  {
-	    DISCARD_LSA (lsa,2);
 	    if (IS_DEBUG_OSPF_NSSA)
 	      zlog_debug("Incoming NSSA LSA Discarded:  Not NSSA Area");
+	    LSA_DONE (lsa,"Discarded, not NSSA area");
 	  }
 
       /* Find the LSA in the current database. */
@@ -1733,7 +1740,7 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
 	  /* Discard LSA. */	  
 	  zlog_info ("Link State Update[%s]: LS age is equal to MaxAge.",
 		     dump_lsa_key(lsa));
-          DISCARD_LSA (lsa, 3);
+          LSA_DONE (lsa, "Discarded, Maxage LSA, but no current copy");
 	}
 
 #ifdef HAVE_OPAQUE_LSA
@@ -1745,16 +1752,19 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
            * be a case that self-originated LSA with MaxAge still remain
            * in the routing domain.
            * Just send an LSAck message to cease retransmission.
+           *
+           * XXX: If this is a genuine problem, it's surely not specific
+           *      to Opaque LSA..
            */
           if (IS_LSA_MAXAGE (lsa))
             {
               zlog_warn ("LSA[%s]: Boomerang effect?", dump_lsa_key (lsa));
               ospf_ls_ack_send (nbr, lsa);
-              ospf_lsa_discard (lsa);
 
               if (current != NULL && ! IS_LSA_MAXAGE (current))
                 ospf_opaque_lsa_refresh_schedule (current);
-              continue;
+
+              LSA_DONE (lsa, "Got back own LSA with MaxAge");
             }
 
           /*
@@ -1780,17 +1790,17 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
               
               ospf_opaque_self_originated_lsa_received (nbr, lsa);
               ospf_ls_ack_send (nbr, lsa);
-              
-              continue;
+              LSA_DONE (lsa, "Acked");
             }
         }
 #endif /* HAVE_OPAQUE_LSA */
 
-      /* It might be happen that received LSA is self-originated network LSA, but
-       * router ID is cahnged. So, we should check if LSA is a network-LSA whose
-       * Link State ID is one of the router's own IP interface addresses but whose
-       * Advertising Router is not equal to the router's own Router ID
-       * According to RFC 2328 12.4.2 and 13.4 this LSA should be flushed.
+      /* It might be happen that received LSA is self-originated
+       * network LSA, but router ID is cahnged. So, we should check if
+       * LSA is a network-LSA whose Link State ID is one of the
+       * router's own IP interface addresses but whose Advertising
+       * Router is not equal to the router's own Router ID According to
+       * RFC 2328 12.4.2 and 13.4 this LSA should be flushed.
        */
 
       if(lsa->data->type == OSPF_NETWORK_LSA)
@@ -1807,15 +1817,12 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
           if((IPV4_ADDR_SAME(&out_if->address->u.prefix4, &lsa->data->id)) &&
               (!(IPV4_ADDR_SAME(&oi->ospf->router_id, &lsa->data->adv_router))))
           {
-            if(out_if->network_lsa_self)
-            {
-              ospf_lsa_flush_area(lsa,out_if->area);
-              if(IS_DEBUG_OSPF_EVENT)
-                zlog_debug ("ospf_lsa_discard() in ospf_ls_upd() point 9: lsa %p Type-%d",
-                            lsa, (int) lsa->data->type);
-              ospf_lsa_discard (lsa);
-              Flag = 1;
-            }
+            if (out_if->network_lsa_self)
+              {
+                ospf_lsa_flush_area(lsa,out_if->area);
+                Flag = 1;
+                LSA_DONE (lsa, "Flushed, our Net LSA with different RID");
+              }
             break;
           }
         }
@@ -1833,8 +1840,8 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
 	{
 	  /* Actual flooding procedure. */
 	  if (ospf_flood (oi->ospf, nbr, current, lsa) < 0)  /* Trap NSSA later. */
-	    DISCARD_LSA (lsa, 4);
-	  continue;
+	    LSA_DONE (lsa, "Discarded, valid LSA but not flooded");
+	  LSA_DONE (lsa, "Flooded");
 	}
 
       /* (6) Else, If there is an instance of the LSA on the sending
@@ -1851,9 +1858,7 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
 	  	    dump_lsa_key(lsa));
 
 	  /* Clean list of LSAs. */
-          ospf_upd_list_clean (lsas);
-	  /* this lsa is not on lsas list already. */
-	  ospf_lsa_discard (lsa);
+	  ospf_upd_list_clean (lsas);
 	  return;
 	}
 
@@ -1882,7 +1887,7 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
 		if (NBR_IS_DR (nbr))
 		  listnode_add (oi->ls_ack, ospf_lsa_lock (lsa));
 
-              DISCARD_LSA (lsa, 5);
+              LSA_DONE (lsa, "Delayed ACK, Implied acknowledgement");
 	    }
 	  else
 	    /* Acknowledge the receipt of the LSA by sending a
@@ -1890,7 +1895,7 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
 	       interface. */
 	    {
 	      ospf_ls_ack_send (nbr, lsa);
-	      DISCARD_LSA (lsa, 6);
+	      LSA_DONE (lsa, "ACKed");
 	    }
 	}
 
@@ -1905,9 +1910,9 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
 	{ 
 	  if (IS_LSA_MAXAGE (current) &&
 	      current->data->ls_seqnum == htonl (OSPF_MAX_SEQUENCE_NUMBER))
-	    {
-	      DISCARD_LSA (lsa, 7);
-	    }
+            {
+              LSA_DONE (lsa, "Discarded, current max-seq LSA still present");
+            }
 	  /* Otherwise, as long as the database copy has not been sent in a
 	     Link State Update within the last MinLSArrival seconds, send the
 	     database copy back to the sending neighbor, encapsulated within
@@ -1926,10 +1931,12 @@ ospf_ls_upd (struct ip *iph, struct ospf_header *ospfh,
 			  int2tv (OSPF_MIN_LS_ARRIVAL)) > 0)
 		/* Trap NSSA type later.*/
 		ospf_ls_upd_send_lsa (nbr, current, OSPF_SEND_PACKET_DIRECT);
-	      DISCARD_LSA (lsa, 8);
+	      LSA_DONE (lsa, "Discarded, Current is more recent than received");
 	    }
 	}
+      LSA_DONE (lsa, "Discarded, not handled / no action");
     }
+#undef LSA_DONE
   
   assert (listcount (lsas) == 0);
   list_delete (lsas);
@@ -1976,7 +1983,7 @@ ospf_ls_ack (struct ip *iph, struct ospf_header *ospfh,
       if (lsa->data->type < OSPF_MIN_LSA || lsa->data->type >= OSPF_MAX_LSA)
 	{
 	  lsa->data = NULL;
-	  ospf_lsa_discard (lsa);
+	  ospf_lsa_free (lsa);
 	  continue;
 	}
 
@@ -1993,7 +2000,7 @@ ospf_ls_ack (struct ip *iph, struct ospf_header *ospfh,
         }
 
       lsa->data = NULL;
-      ospf_lsa_discard (lsa);
+      ospf_lsa_free (lsa);
     }
 
   return;
@@ -2645,7 +2652,7 @@ ospf_make_db_desc (struct ospf_interface *oi, struct ospf_neighbor *nbr,
   unsigned long pp;
   int i;
   struct ospf_lsdb *lsdb;
-  
+   
   /* Set Interface MTU. */
   if (oi->type == OSPF_IFTYPE_VIRTUALLINK)
     stream_putw (s, 0);
@@ -2658,19 +2665,19 @@ ospf_make_db_desc (struct ospf_interface *oi, struct ospf_neighbor *nbr,
   if (CHECK_FLAG (oi->ospf->config, OSPF_OPAQUE_CAPABLE))
     {
       if (IS_SET_DD_I (nbr->dd_flags)
-      ||  CHECK_FLAG (nbr->options, OSPF_OPTION_O))
-        /*
-         * Set O-bit in the outgoing DD packet for capablity negotiation,
-         * if one of following case is applicable. 
-         *
-         * 1) WaitTimer expiration event triggered the neighbor state to
-         *    change to Exstart, but no (valid) DD packet has received
-         *    from the neighbor yet.
-         *
-         * 2) At least one DD packet with O-bit on has received from the
-         *    neighbor.
-         */
-        SET_FLAG (options, OSPF_OPTION_O);
+	  || CHECK_FLAG (nbr->options, OSPF_OPTION_O))
+	/*
+	 * Set O-bit in the outgoing DD packet for capablity negotiation,
+	 * if one of following case is applicable. 
+	 *
+	 * 1) WaitTimer expiration event triggered the neighbor state to
+	 *    change to Exstart, but no (valid) DD packet has received
+	 *    from the neighbor yet.
+	 *
+	 * 2) At least one DD packet with O-bit on has received from the
+	 *    neighbor.
+	 */
+	SET_FLAG (options, OSPF_OPTION_O);
     }
 #endif /* HAVE_OPAQUE_LSA */
   stream_putc (s, options);
@@ -2705,39 +2712,38 @@ ospf_make_db_desc (struct ospf_interface *oi, struct ospf_neighbor *nbr,
 	if ((lsa = rn->info) != NULL)
 	  {
 #ifdef HAVE_OPAQUE_LSA
-            if (IS_OPAQUE_LSA (lsa->data->type)
-            && (! CHECK_FLAG (options, OSPF_OPTION_O)))
-              {
-                /* Suppress advertising opaque-informations. */
-                /* Remove LSA from DB summary list. */
-                ospf_lsdb_delete (lsdb, lsa);
-                continue;
-              }
+	    if (IS_OPAQUE_LSA (lsa->data->type)
+		&& (!CHECK_FLAG (options, OSPF_OPTION_O)))
+	      {
+		/* Suppress advertising opaque-informations. */
+		/* Remove LSA from DB summary list. */
+		ospf_lsdb_delete (lsdb, lsa);
+		continue;
+	      }
 #endif /* HAVE_OPAQUE_LSA */
 
-	    if (!CHECK_FLAG (lsa->flags, OSPF_LSA_DISCARD))
+	    if (!IS_LSA_MAXAGE (lsa))
 	      {
 		struct lsa_header *lsah;
 		u_int16_t ls_age;
-		
+
 		/* DD packet overflows interface MTU. */
 		if (length + OSPF_LSA_HEADER_SIZE > ospf_packet_max (oi))
 		  break;
-		
+
 		/* Keep pointer to LS age. */
 		lsah = (struct lsa_header *) (STREAM_DATA (s) +
 					      stream_get_endp (s));
-		
+
 		/* Proceed stream pointer. */
 		stream_put (s, lsa->data, OSPF_LSA_HEADER_SIZE);
 		length += OSPF_LSA_HEADER_SIZE;
-		
+
 		/* Set LS age. */
 		ls_age = LS_AGE (lsa);
 		lsah->ls_age = htons (ls_age);
-		
 	      }
-	    
+
 	    /* Remove LSA from DB summary list. */
 	    ospf_lsdb_delete (lsdb, lsa);
 	  }
@@ -2763,7 +2769,7 @@ ospf_make_ls_req_func (struct stream *s, u_int16_t *length,
   stream_put_ipv4 (s, lsa->data->id.s_addr);
   stream_put_ipv4 (s, lsa->data->adv_router.s_addr);
   
-  ospf_lsa_unlock (nbr->ls_req_last);
+  ospf_lsa_unlock (&nbr->ls_req_last);
   nbr->ls_req_last = ospf_lsa_lock (lsa);
   
   *length += 12;
@@ -2859,7 +2865,7 @@ ospf_make_ls_upd (struct ospf_interface *oi, struct list *update, struct stream 
       count++;
 
       list_delete_node (update, node);
-      ospf_lsa_unlock (lsa);
+      ospf_lsa_unlock (&lsa); /* oi->ls_upd_queue */
     }
 
   /* Now set #LSAs. */
@@ -2873,17 +2879,13 @@ ospf_make_ls_upd (struct ospf_interface *oi, struct list *update, struct stream 
 static int
 ospf_make_ls_ack (struct ospf_interface *oi, struct list *ack, struct stream *s)
 {
-  struct list *rm_list;
-  struct listnode *node;
+  struct listnode *node, *nnode;
   u_int16_t length = OSPF_LS_ACK_MIN_SIZE;
   unsigned long delta = stream_get_endp(s) + 24;
   struct ospf_lsa *lsa;
 
-  rm_list = list_new ();
-  
-  for (ALL_LIST_ELEMENTS_RO (ack, node, lsa))
+  for (ALL_LIST_ELEMENTS (ack, node, nnode, lsa))
     {
-      lsa = listgetdata (node);
       assert (lsa);
       
       if (length + delta > ospf_packet_max (oi))
@@ -2892,20 +2894,9 @@ ospf_make_ls_ack (struct ospf_interface *oi, struct list *ack, struct stream *s)
       stream_put (s, lsa->data, OSPF_LSA_HEADER_SIZE);
       length += OSPF_LSA_HEADER_SIZE;
       
-      listnode_add (rm_list, lsa);
+      list_delete_node (ack, node);
+      ospf_lsa_unlock (&lsa); /* oi->ls_ack_direct.ls_ack */
     }
-  
-  /* Remove LSA from LS-Ack list. */
-  /* XXX: this loop should be removed and the list move done in previous
-   * loop
-   */
-  for (ALL_LIST_ELEMENTS_RO (rm_list, node, lsa))
-    {
-      listnode_delete (ack, lsa);
-      ospf_lsa_unlock (lsa);
-    }
-  
-  list_delete (rm_list);
   
   return length;
 }
@@ -3395,10 +3386,7 @@ ospf_ls_upd_send (struct ospf_neighbor *nbr, struct list *update, int flag)
     rn->info = list_new ();
 
   for (ALL_LIST_ELEMENTS_RO (update, node, lsa))
-    {
-      ospf_lsa_lock (lsa);
-      listnode_add (rn->info, lsa);
-    }
+    listnode_add (rn->info, ospf_lsa_lock (lsa)); /* oi->ls_upd_queue */
 
   if (oi->t_ls_upd_event == NULL)
     oi->t_ls_upd_event =

@@ -1,5 +1,47 @@
 2006-06-02 Paul Jakma <paul.jakma@sun.com>
 
+	* (general) Audit and rationalise LSA refcounts ('lock') a bit.
+	  - don't /create/ LSAs with refcnt set to 1, should be 0.
+	  - Hence get rid of ospf_lsa.c's implicit refcount and the need
+	    for the silly 'OSPF_LSA_DISCARD' flag.
+	  - Installation of LSAs to respective LSDBs become the primary
+	    LSA references (generally via ospf_lsa_install).
+	* ospf_lsa.c: (ospf_lsa_unlock) Make ospf_lsa_unlock take a
+	  double pointer, so it can NULL out the caller's pointer to
+	  the LSA if it is freed, and hence hopefully allow refcounting
+	  errors to be caught *much* earlier (rather than turning into
+	  weird memory corruption bugs) - and update all its callers to
+	  suit.
+	  (ospf_lsa_{new,lock,unlock}) Some extra debug.
+	  (ospf_lsa_{dup,new}) Dont create LSAs with refcount
+	  implicitely set to 1.
+	  (ospf_lsa_discard) Deleted, along with the horrid implicit refcount
+	  rubbish.
+	  (ospf_*_lsa_{originate,new}) replace ospf_lsa_discard with
+	  ospf_lsa_free where appropriate. Remove any weird implicit
+	  refcounting for mere LSA construction.
+	  (ospf_discard_from_db) Remove ospf_lsa_discard, let LSDB removal
+	  unlock and hence reap LSAs when required.
+	* ospf_lsdb.c: (ospf_lsdb_delete_entry) new function, consolidate
+	  lsa LSDB removal which was duplicated in the _add, _delete and
+	  _delete_all LSDB functions.
+	* ospf_dump.{c,h}: Add 'debug ospf lsa lock'.
+	* ospf_opaque.c: (ospf_opaque_self_originated_lsa_received) With
+	  the removal of ospf_lsa_discard, the goto stuff can be removed
+	  too.
+	* ospf_packet.c: (ospf_ls_upd_list_lsa) Always lock the newly
+	  created LSA as it's added to the temporary list used to
+	  hand back LSAs to caller.
+	  (ospf_ls_upd) Reform, in light of ospf_lsa_discard being removed.
+	  DISCARD_LSA becomes LSA_DONE, which generally is how *every*
+	  loop iteration should end, which unlocks the LSA, and provides
+	  some debug functionality.
+	  (ospf_make_ls_ack) Address the XXX, easy to do with the
+	  ALL_LIST_ELEMENTS macro.
+	  (ospf_make_db_desc) run function through indent, to fix
+	  inconsistent formatting - the only /functional/ change is
+	  that the conditional on OSPF_LSA_DISCARD changes to 
+	  IS_LSA_MAXAGE.
 	* ospf_flood.c: (ospf_lsa_flush) Fix mistake in previous commit, 
 	  args to ospf_lsa_flush_area were wrong way around.
 

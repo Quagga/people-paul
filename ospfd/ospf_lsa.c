@@ -226,8 +226,10 @@ ospf_lsa_new ()
   new = XCALLOC (MTYPE_OSPF_LSA, sizeof (struct ospf_lsa));
   memset (new, 0, sizeof (struct ospf_lsa));
 
+  if (IS_DEBUG_OSPF (lsa, LSA))
+    zlog_debug ("LSA: created %p", new);
+
   new->flags = 0;
-  new->lock = 1;
   new->retransmit_counter = 0;
   gettimeofday (&new->tv_recv, NULL);
   new->tv_orig = new->tv_recv;
@@ -248,8 +250,7 @@ ospf_lsa_dup (struct ospf_lsa *lsa)
   new = XCALLOC (MTYPE_OSPF_LSA, sizeof (struct ospf_lsa));
 
   memcpy (new, lsa, sizeof (struct ospf_lsa));
-  UNSET_FLAG (new->flags, OSPF_LSA_DISCARD);
-  new->lock = 1;
+  new->lock = 0;
   new->retransmit_counter = 0;
   new->data = ospf_lsa_data_dup (lsa->data);
 
@@ -289,36 +290,32 @@ struct ospf_lsa *
 ospf_lsa_lock (struct ospf_lsa *lsa)
 {
   lsa->lock++;
+  
+  if (IS_DEBUG_OSPF(lsa, LSA_LOCK))
+    zlog_debug ("%15s: lsa: %18p cnt: %u", __func__, lsa, lsa->lock);
+
   return lsa;
 }
 
 /* Unlock LSA. */
 void
-ospf_lsa_unlock (struct ospf_lsa *lsa)
+ospf_lsa_unlock (struct ospf_lsa **lsa)
 {
   /* This is sanity check. */
-  if (!lsa)
+  if (!lsa || !*lsa)
     return;
   
-  lsa->lock--;
+  (*lsa)->lock--;
 
-  assert (lsa->lock >= 0);
+  if (IS_DEBUG_OSPF(lsa, LSA_LOCK))
+    zlog_debug ("%15s: lsa: %18p cnt: %u", __func__, *lsa, (*lsa)->lock);
 
-  if (lsa->lock == 0)
+  assert ((*lsa)->lock >= 0);
+
+  if ((*lsa)->lock == 0)
     {
-      assert (CHECK_FLAG (lsa->flags, OSPF_LSA_DISCARD));
-      ospf_lsa_free (lsa);
-    }
-}
-
-/* Check discard flag. */
-void
-ospf_lsa_discard (struct ospf_lsa *lsa)
-{
-  if (!CHECK_FLAG (lsa->flags, OSPF_LSA_DISCARD))
-    {
-      SET_FLAG (lsa->flags, OSPF_LSA_DISCARD);
-      ospf_lsa_unlock (lsa);
+      ospf_lsa_free (*lsa);
+      *lsa = NULL;
     }
 }
 
@@ -892,7 +889,7 @@ ospf_router_lsa_originate (struct ospf_area *area)
     {
       if (IS_DEBUG_OSPF_EVENT)
 	zlog_debug ("LSA[Type1]: AdvRouter is 0, discard");
-      ospf_lsa_discard (new);
+      ospf_lsa_free (new);
       return NULL;
     }
 
@@ -1043,7 +1040,7 @@ ospf_router_lsa_update_timer (struct thread *thread)
 	    zlog_debug("LSA[Type%d:%s]: Refresh router-LSA for Area %s",
 		      lsa->data->type, inet_ntoa (lsa->data->id), area_str);
 	  ospf_lsa_flush_area (lsa, area);
-	  ospf_lsa_unlock (area->router_lsa_self);
+	  ospf_lsa_unlock (&area->router_lsa_self);
 	  area->router_lsa_self = NULL;
 
 	  /* Refresh router-LSA, (not install) and flood through area. */
@@ -1849,7 +1846,7 @@ ospf_install_flood_nssa (struct ospf *ospf,
 	  {
 	    if (IS_DEBUG_OSPF_NSSA)
 	      zlog_debug ("LSA[Type-7]: Could not build FWD-ADDR");
-	    ospf_lsa_discard(new);
+	    ospf_lsa_free (new);
 	    return;
 	  }
 	}
@@ -1905,7 +1902,6 @@ ospf_lsa_translated_nssa_new (struct ospf *ospf,
   /* add translated flag, checksum and lock new lsa */
   SET_FLAG (new->flags, OSPF_LSA_LOCAL_XLT); /* Translated from 7  */   
   ospf_lsa_checksum (new->data);
-  new = ospf_lsa_lock (new);
   
   return new; 
 }
@@ -2517,7 +2513,7 @@ ospf_router_lsa_install (struct ospf *ospf,
                           ospf_router_lsa_timer, OSPF_LS_REFRESH_TIME);
       
       /* Set self-originated router-LSA. */
-      ospf_lsa_unlock (area->router_lsa_self);
+      ospf_lsa_unlock (&area->router_lsa_self);
       area->router_lsa_self = ospf_lsa_lock (new);
 
       if (IS_DEBUG_OSPF (lsa, LSA_INSTALL))
@@ -2561,7 +2557,7 @@ ospf_network_lsa_install (struct ospf *ospf,
 			       ospf_network_lsa_refresh_timer,
 			       OSPF_LS_REFRESH_TIME);
 
-      ospf_lsa_unlock (oi->network_lsa_self);
+      ospf_lsa_unlock (&oi->network_lsa_self);
       oi->network_lsa_self = ospf_lsa_lock (new);
     }
 
@@ -2719,7 +2715,6 @@ ospf_discard_from_db (struct ospf *ospf,
     }
 
   ospf_lsa_maxage_delete (ospf, old);
-  ospf_lsa_discard (old);
 }
 
 struct ospf_lsa *
@@ -3031,7 +3026,7 @@ ospf_lsa_maxage_delete (struct ospf *ospf, struct ospf_lsa *lsa)
   if ((n = listnode_lookup (ospf->maxage_lsa, lsa)))
     {
       list_delete_node (ospf->maxage_lsa, n);
-      ospf_lsa_unlock (lsa);
+      ospf_lsa_unlock (&lsa); /* maxage_lsa */
     }
 }
 
@@ -3453,7 +3448,7 @@ ospf_flush_self_originated_lsas_now (struct ospf *ospf)
             zlog_debug ("LSA[Type%d:%s]: Schedule self-originated LSA to FLUSH", lsa->data->type, inet_ntoa (lsa->data->id));
 
           ospf_lsa_flush_area (lsa, area);
-          ospf_lsa_unlock (area->router_lsa_self);
+          ospf_lsa_unlock (&area->router_lsa_self);
           area->router_lsa_self = NULL;
           OSPF_TIMER_OFF (area->t_router_lsa_self);
         }
@@ -3468,7 +3463,7 @@ ospf_flush_self_originated_lsas_now (struct ospf *ospf)
                 zlog_debug ("LSA[Type%d:%s]: Schedule self-originated LSA to FLUSH", lsa->data->type, inet_ntoa (lsa->data->id));
 
               ospf_lsa_flush_area (oi->network_lsa_self, area);
-              ospf_lsa_unlock (oi->network_lsa_self);
+              ospf_lsa_unlock (&oi->network_lsa_self);
               oi->network_lsa_self = NULL;
               OSPF_TIMER_OFF (oi->t_network_lsa_self);
             }
@@ -3637,7 +3632,7 @@ ospf_lsa_action (struct thread *t)
       break;
     }
 
-  ospf_lsa_unlock (data->lsa);
+  ospf_lsa_unlock (&data->lsa); /* Message */
   XFREE (MTYPE_OSPF_MESSAGE, data);
   return 0;
 }
@@ -3652,7 +3647,7 @@ ospf_schedule_lsa_flood_area (struct ospf_area *area, struct ospf_lsa *lsa)
 
   data->action = LSA_ACTION_FLOOD_AREA;
   data->area = area;
-  data->lsa  = ospf_lsa_lock (lsa);
+  data->lsa  = ospf_lsa_lock (lsa); /* Message / Flood area */
 
   thread_add_event (master, ospf_lsa_action, data, 0);
 }
@@ -3667,7 +3662,7 @@ ospf_schedule_lsa_flush_area (struct ospf_area *area, struct ospf_lsa *lsa)
 
   data->action = LSA_ACTION_FLUSH_AREA;
   data->area = area;
-  data->lsa  = ospf_lsa_lock (lsa);
+  data->lsa  = ospf_lsa_lock (lsa); /* Message / Flush area */
 
   thread_add_event (master, ospf_lsa_action, data, 0);
 }
@@ -3750,7 +3745,8 @@ ospf_refresher_register_lsa (struct ospf *ospf, struct ospf_lsa *lsa)
 		   inet_ntoa (lsa->data->id), LS_AGE (lsa), index);
       if (!ospf->lsa_refresh_queue.qs[index])
 	ospf->lsa_refresh_queue.qs[index] = list_new ();
-      listnode_add (ospf->lsa_refresh_queue.qs[index], ospf_lsa_lock (lsa));
+      listnode_add (ospf->lsa_refresh_queue.qs[index], 
+                    ospf_lsa_lock (lsa)); /* lsa_refresh_queue */
       lsa->refresh_list = index;
       if (IS_DEBUG_OSPF (lsa, LSA_REFRESH))
         zlog_debug ("LSA[Refresh:%s]: ospf_refresher_register_lsa(): "
@@ -3772,7 +3768,7 @@ ospf_refresher_unregister_lsa (struct ospf *ospf, struct ospf_lsa *lsa)
 	  list_free (refresh_list);
 	  ospf->lsa_refresh_queue.qs[lsa->refresh_list] = NULL;
 	}
-      ospf_lsa_unlock (lsa);
+      ospf_lsa_unlock (&lsa); /* Refresh list */
       lsa->refresh_list = -1;
     }
 }
@@ -3826,7 +3822,7 @@ ospf_lsa_refresh_walker (struct thread *t)
 		           inet_ntoa (lsa->data->id), lsa, i);
 	      
 	      list_delete_node (refresh_list, node);
-	      ospf_lsa_unlock (lsa);
+	      ospf_lsa_unlock (&lsa); /* refresh list */
 	      lsa->refresh_list = -1;
 	      listnode_add (lsa_to_refresh, lsa);
 	    }

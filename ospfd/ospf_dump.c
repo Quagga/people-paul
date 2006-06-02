@@ -1171,6 +1171,8 @@ DEFUN (debug_ospf_lsa,
 	    DEBUG_ON (lsa, LSA_INSTALL);
 	  else if (strncmp (argv[0], "r", 1) == 0)
 	    DEBUG_ON (lsa, LSA_REFRESH);
+	  else if (strncmp (argv[0], "l", 1) == 0)
+	    DEBUG_ON (lsa, LSA_LOCK);
 	}
 
       return CMD_SUCCESS;
@@ -1189,6 +1191,8 @@ DEFUN (debug_ospf_lsa,
 	TERM_DEBUG_ON (lsa, LSA_INSTALL);
       else if (strncmp (argv[0], "r", 1) == 0)
 	TERM_DEBUG_ON (lsa, LSA_REFRESH);
+      else if (strncmp (argv[0], "l", 1) == 0)
+	TERM_DEBUG_ON (lsa, LSA_LOCK);
     }
 
   return CMD_SUCCESS;
@@ -1196,14 +1200,15 @@ DEFUN (debug_ospf_lsa,
 
 ALIAS (debug_ospf_lsa,
        debug_ospf_lsa_sub_cmd,
-       "debug ospf lsa (generate|flooding|install|refresh)",
+       "debug ospf lsa (generate|flooding|install|refresh|locks)",
        DEBUG_STR
        OSPF_STR
        "OSPF Link State Advertisement\n"
        "LSA Generation\n"
        "LSA Flooding\n"
        "LSA Install/Delete\n"
-       "LSA Refresh\n")
+       "LSA Refresh\n"
+       "LSA 'Locking' (ie reference counting)\n")
 
 DEFUN (no_debug_ospf_lsa,
        no_debug_ospf_lsa_cmd,
@@ -1227,6 +1232,8 @@ DEFUN (no_debug_ospf_lsa,
 	    DEBUG_OFF (lsa, LSA_INSTALL);
 	  else if (strncmp (argv[0], "r", 1) == 0)
 	    DEBUG_OFF (lsa, LSA_REFRESH);
+	  else if (strncmp (argv[0], "l", 1) == 0)
+	    DEBUG_OFF (lsa, LSA_LOCK);
 	}
 
       return CMD_SUCCESS;
@@ -1245,6 +1252,8 @@ DEFUN (no_debug_ospf_lsa,
 	TERM_DEBUG_OFF (lsa, LSA_INSTALL);
       else if (strncmp (argv[0], "r", 1) == 0)
 	TERM_DEBUG_OFF (lsa, LSA_REFRESH);
+      else if (strncmp (argv[0], "l", 1) == 0)
+	TERM_DEBUG_OFF (lsa, LSA_LOCK);
     }
 
   return CMD_SUCCESS;
@@ -1252,7 +1261,7 @@ DEFUN (no_debug_ospf_lsa,
 
 ALIAS (no_debug_ospf_lsa,
        no_debug_ospf_lsa_sub_cmd,
-       "no debug ospf lsa (generate|flooding|install|refresh)",
+       "no debug ospf lsa (generate|flooding|install|refresh|locks)",
        NO_STR
        DEBUG_STR
        OSPF_STR
@@ -1260,7 +1269,8 @@ ALIAS (no_debug_ospf_lsa,
        "LSA Generation\n"
        "LSA Flooding\n"
        "LSA Install/Delete\n"
-       "LSA Refres\n")
+       "LSA Refresh\n"
+       "LSA 'Locking' (ie reference counting)\n")
 
 
 DEFUN (debug_ospf_zebra,
@@ -1564,6 +1574,8 @@ config_write_debug (struct vty *vty)
 	vty_out (vty, "debug ospf lsa install%s", VTY_NEWLINE);
       if (IS_CONF_DEBUG_OSPF (lsa, LSA_REFRESH))
 	vty_out (vty, "debug ospf lsa refresh%s", VTY_NEWLINE);
+      if (IS_CONF_DEBUG_OSPF (lsa, LSA_LOCK))
+        vty_out (vty, "debug ospf lsa lock%s", VTY_NEWLINE);
 
       write = 1;
     }
