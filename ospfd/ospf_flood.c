@@ -1011,7 +1011,7 @@ ospf_lsa_flush (struct ospf *ospf, struct ospf_lsa *lsa)
       case OSPF_OPAQUE_LINK_LSA:
       case OSPF_OPAQUE_AREA_LSA:
 #endif /* HAVE_OPAQUE_LSA */
-        ospf_lsa_flush_area (lsa->area, lsa);
+        ospf_lsa_flush_area (lsa, lsa->area);
         break;
       case OSPF_AS_EXTERNAL_LSA:
 #ifdef HAVE_OPAQUE_LSA
