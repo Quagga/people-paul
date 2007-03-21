@@ -1818,6 +1818,7 @@ rip_read (struct thread *t)
   struct rip_packet *packet;
   struct sockaddr_in from;
   int len;
+  int vrecv;
   socklen_t fromlen;
   struct interface *ifp;
   struct connected *ifc;
@@ -1937,8 +1938,8 @@ rip_read (struct thread *t)
     }
 
   /* RIP Version check. RFC2453, 4.6 and 5.1 */
-  int vrecv = ((ri->ri_receive == RI_RIP_UNSPEC) ?
-               rip->version_recv : ri->ri_receive);
+  vrecv = ((ri->ri_receive == RI_RIP_UNSPEC) ?
+           rip->version_recv : ri->ri_receive);
   if ((packet->version == RIPv1) && !(vrecv & RIPv1))
     {
       if (IS_RIP_DEBUG_PACKET)
@@ -2448,19 +2449,22 @@ rip_update_interface (struct connected *ifc, u_char version, int route_type)
           /* Destination address and port setting. */
           memset (&to, 0, sizeof (struct sockaddr_in));
           if (ifc->destination)
-            /* use specified broadcast or point-to-point destination addr */
+            /* use specified broadcast or peer destination addr */
             to.sin_addr = ifc->destination->u.prefix4;
-          else
+          else if (ifc->address->prefixlen < IPV4_MAX_PREFIXLEN)
             /* calculate the appropriate broadcast address */
             to.sin_addr.s_addr =
               ipv4_broadcast_addr(ifc->address->u.prefix4.s_addr,
                                   ifc->address->prefixlen);
+	  else
+	    /* do not know where to send the packet */
+	    return;
           to.sin_port = htons (RIP_PORT_DEFAULT);
 
           if (IS_RIP_DEBUG_EVENT)
-            zlog_debug ("%s announce to %s on %s",
-                       if_is_pointopoint (ifc->ifp) ? "unicast" : "broadcast",
-                       inet_ntoa (to.sin_addr), ifc->ifp->name);
+            zlog_debug("%s announce to %s on %s",
+		       CONNECTED_PEER(ifc) ? "unicast" : "broadcast",
+		       inet_ntoa (to.sin_addr), ifc->ifp->name);
 
           rip_output_process (ifc, &to, route_type, version);
         }
