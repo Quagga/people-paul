@@ -56,6 +56,7 @@ static struct option longopts[] =
   { "version",		no_argument,		NULL,	'V' },
   { "ipv4",		no_argument,		NULL,	'4' },
   { "ipv6",		no_argument,		NULL,	'6' },
+  { "monitor",		no_argument,		NULL,	'm' },
   { "help",		no_argument,		NULL,	'?' },
   { 0 }
 };
@@ -105,7 +106,7 @@ get_subcommand (int argc, char **argv)
    * $0 <--help|--version>
    * $0 SUBCOMMAND
    */
-  
+  return 0;
 }
 
 /* Help information display. */
@@ -173,7 +174,7 @@ Report bugs to %s\n",
   exit (status);
 }
 
-static const char * const route_subopts[] =
+static char * const route_subopts[] =
 {
   [ZEBRA_ROUTE_SYSTEM]	= "system",
   [ZEBRA_ROUTE_KERNEL]	= "kernel",
@@ -190,32 +191,32 @@ static const char * const route_subopts[] =
   NULL
 };
 
-/* 0 to display this ifname, 1 to ignore */
+/* 0 to display the name, 1 to ignore */
 static unsigned int
-qcli_test_ifname (const char *ifname)
+qcli_test_name (const char *pattern, const char *name)
 {
   const char *i;
   int neg = 0;
   unsigned int ret;
   
-  if (!config.ifarg)
+  if (!pattern)
     return 0;
   
-  if (!ifname)
+  if (!name)
     return 0;
   
-  if (config.ifarg[0] == '!')
+  if (pattern[0] == '!')
     {
       neg = 1;
-      i = (config.ifarg + 1);
+      i = (pattern + 1);
     }
   else
-    i = config.ifarg;
+    i = pattern;
   
   if (i[0] == '\0')
     return 0;
   
-  ret = fnmatch (i, ifname, 0);
+  ret = fnmatch (i, name, 0);
     
   if (neg)
     ret = (ret ? 0 : 1);
@@ -237,24 +238,24 @@ qcli_interface_add (int command, struct zclient *zclient,
     {
       int i;
       
-      if (qcli_test_ifname (ifp->name))
+      if (qcli_test_name (config.ifarg, ifp->name))
         return 0;
       
-      printf ("interface: %s", ifp->name);
+      printf ("%-10s %s", "interface:", ifp->name);
       printf (" is %s\n",
               if_is_up (ifp) ? "up" : "down");
       if (ifp->flags)
-        printf ("  %10s: %s\n", "flags", if_flag_dump (ifp->flags));
+        printf ("%19s: %s\n", "flags", if_flag_dump (ifp->flags));
       if (ifp->hw_addr_len)
         {
-          printf ("  %10s: ", "HW address");
+          printf ("%19s: ", "HW address");
           for (i = 0; i < ifp->hw_addr_len; i++)
             printf ("%s%02x", i == 0 ? "" : ":", ifp->hw_addr[i]);
           printf ("\n");
         }
       if (ifp->ifindex)
         {
-          printf ("  %10s: %u metric: %u mtu: %u mtu6: %u", "index",
+          printf ("%19s: %u metric: %u mtu: %u mtu6: %u", "index",
                   ifp->ifindex, ifp->metric, ifp->mtu, ifp->mtu6);
           if (ifp->bandwidth)
             printf (" bandwidth: %u", ifp->bandwidth);
@@ -305,7 +306,7 @@ qcli_interface_address_add (int command, struct zclient *zclient,
   if (config.afi && (c->address->family != afi2family (config.afi)))
     return 0;
   
-  if (qcli_test_ifname (c->ifp->name))
+  if (qcli_test_name (config.ifarg, c->ifp->name))
     return 0;
   
   if (c->address)
@@ -313,7 +314,7 @@ qcli_interface_address_add (int command, struct zclient *zclient,
   else
     return 0;
   
-  printf ("address: %-5s %s",
+  printf ("%-10s %-5s %s", "address:",
           prefix_family_str (c->address), addr);
   
   if (c->destination)
@@ -402,7 +403,7 @@ qcli_zebra_route (int command, struct zclient *zclient, zebra_size_t length)
         return 0;
     }
   
-  printf ("route: ");
+  printf ("%-10s ", "route:");
   
   /* if restribute_add completed, then we're monitoring, these are updates */
   if (!CHECK_FLAG (config.sources, QTOOL_SOURCE_ROUTES))
@@ -475,6 +476,7 @@ qcli_zebra_init (void)
     }
   if (config.sources & QTOOL_SOURCE_ROUTES)
     {
+      printf ("setting up routes\n");
       switch (config.afi)
         {
           default:
@@ -492,6 +494,7 @@ qcli_zebra_init (void)
 #ifdef ZEBRA_COMMAND_COMPLETION
   zclient->completion = qcli_completion;
 #endif /* ZEBRA_COMMAND_COMPLETION */
+
 }
 
 static int
@@ -501,6 +504,8 @@ exit_timer (struct thread *t)
   return 0;
 }
 
+extern int zclient_debug;
+
 /* main routine. */
 int
 main (int argc, char **argv)
@@ -521,6 +526,7 @@ main (int argc, char **argv)
   /* setup zclient */
   zclient = zclient_new ();
   zclient_init (zclient, ZEBRA_ROUTE_SYSTEM);
+  //zclient_debug = 1;
   
   while (1) 
     {
@@ -529,7 +535,7 @@ main (int argc, char **argv)
       
       opt = getopt_long (argc, argv, subcmd_opts[QTOOL_SCMD_LIST], longopts, 0);
 
-      printf ("optind: %d, opt %x optopt: %x, argc: %u, argv[optind]: %s\n",
+      printf ("optind: %d, opt %c optopt: %x, argc: %u, argv[optind]: %s\n",
               optind, opt, optopt, argc, argv[optind]);
 
       if (opt == -1)
