@@ -32,6 +32,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #define BGP_MED_MAX UINT32_MAX
 
+
 /* BGP Attribute type range. */
 #define BGP_ATTR_TYPE_RANGE     256
 #define BGP_ATTR_BITMAP_SIZE    (BGP_ATTR_TYPE_RANGE / BITMAP_NBBY)
@@ -44,6 +45,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 /* BGP attribute header must bigger than 2. */
 #define BGP_ATTR_MIN_LEN        2       /* Attribute flag and type. */
+#define BGP_ATTR_DEFAULT_WEIGHT 32768
 
 /* Additional/uncommon BGP attributes.
  * lazily allocated as and when a struct attr
@@ -155,8 +157,8 @@ extern bgp_size_t bgp_packet_withdraw (struct peer *peer, struct stream *s,
                                 struct prefix_rd *, u_char *);
 extern void bgp_dump_routes_attr (struct stream *, struct attr *,
 				  struct prefix *);
-extern unsigned int attrhash_key_make (struct attr *);
-extern int attrhash_cmp (struct attr *, struct attr *);
+extern int attrhash_cmp (void *, void *);
+extern unsigned int attrhash_key_make (void *);
 extern void attr_show_all (struct vty *);
 extern unsigned long int attr_count (void);
 extern unsigned long int attr_unknown_count (void);
