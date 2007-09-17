@@ -1,3 +1,19 @@
+2007-09-17 Paul Jakma <paul.jakma@sun.com>
+
+	* memory.c: Set TRACK_TIDES to on by default, it's interesting
+	  information while testing. Set poison to off, not useful for
+	  widespread testing. Increase slots to get better hits, cache
+	  consumes 17KiB with 10 slots on x86.
+	  (show_memory_vty_header) Print size of struct mstat.
+	  (show_memory_vty) Take an 'aggregate_stats' struct as argument
+	  to allow some global stats to be counted up.
+	  Don't print out the memory-stats header here, or it'll
+	  be printed out for every list by show memory all.
+	  (show_aggregate_stats_vty) print out aggregate_stats.
+	  (show_memory_all) Print stats header here.
+	  (show_memory_list_vty) helper for list-specific commands.
+	* memtypes.c: ATTR_EXTRA is fixed size and cacheable.
+
 2007-08-21 Denis Ovsienko
 
 	* sockopt.[ch]: (setsockopt_so_sendbuf, getsockopt_so_sendbuf):

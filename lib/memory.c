@@ -32,12 +32,12 @@
 /* some debug and probably performance debilitating compile options.. */
 #define MTYPE_EXTRA_STATS 1
 /* Tide optimisation (if it actually is an optimisation */
-#define MTYPE_TRACK_TIDES 0
+#define MTYPE_TRACK_TIDES 1
 /* free() debugging: poison on free if possible and verify poison on realloc,
  * check for double-free's.
  * This will use a lot of extra RAM.
  */
-#define MTYPE_POISON 1
+#define MTYPE_POISON 0
 /* Redzone tracking (where possible - size must stay same for object) */
 #define MTYPE_REDZONE 1
 
@@ -84,7 +84,7 @@ zerror (const char *fname, int type, size_t size)
 /* Normally we only want a very few cache slots, as these are statically 
  * allocated
  */
-#define MTYPE_CACHE_NUM_SLOTS 3
+#define MTYPE_CACHE_NUM_SLOTS 10
 #endif /* MTYPE_POISON */
 
 /* Allocations / frees can be thought of as coming in 'tides', with a 'flow'
@@ -636,6 +636,8 @@ show_separator(struct vty *vty)
 static void
 show_memory_vty_header (struct vty *vty)
 {
+  char buf[20];
+  
   vty_out (vty, "%12s\t%s%s", "Cached:",
            "Objects cached, -1 for invalidated cache",
            VTY_NEWLINE);
@@ -664,11 +666,14 @@ show_memory_vty_header (struct vty *vty)
            VTY_NEWLINE);
 #endif /* MTYPE_EXTRA_STATS */
 
-  vty_out (vty, "Cache slots: %3d, Poisoning: %senabled, "
+  vty_out (vty, "Cache slots: %u, Poisoning: %senabled, "
                  "Redzone: %senabled%s",
            MTYPE_CACHE_NUM_SLOTS,
            (MTYPE_POISON > 0) ? "" : "not ",
            (MTYPE_REDZONE > 0) ? "" : "not ",
+           VTY_NEWLINE);
+  vty_out (vty, "Memory-track struct size: %s%s",
+           mtype_memstr (buf, sizeof (buf), sizeof (mstat)),
            VTY_NEWLINE);
   
   vty_out (vty, "%s%-28s | %10s | %10s | %11s | %7s%s",
@@ -677,14 +682,50 @@ show_memory_vty_header (struct vty *vty)
            "Caching", VTY_NEWLINE);
 }
 
+struct aggregate_stats
+{
+  unsigned long cache_hits;
+  unsigned long cache_hitsb;
+  unsigned long cache_adds;
+  unsigned long allocs;
+  unsigned long allocb;
+  unsigned long frees;
+  unsigned long cached;
+};
+
+static void
+show_aggregate_stats_vty (struct vty *vty, struct aggregate_stats *aggr)
+{
+  char buf[20];
+  
+  vty_out (vty, "Aggregate counts for all objects types%s", VTY_NEWLINE);
+  vty_out (vty, "(Figures may be prone to overflow)%s", VTY_NEWLINE);
+  vty_out (vty, "%20s:\t%lu%s", "Allocations (#)",
+           aggr->allocs, VTY_NEWLINE);
+  vty_out (vty, "%20s:\t%s%s", "Allocations (size)",
+           mtype_memstr (buf, sizeof(buf), aggr->allocb), VTY_NEWLINE);
+  vty_out (vty, "%20s:\t%lu%s", "Frees",
+           aggr->frees, VTY_NEWLINE);
+  vty_out (vty, "%20s:\t%s%s", "Cached objects size",
+           mtype_memstr (buf, sizeof(buf), aggr->cached), VTY_NEWLINE);
+  if (aggr->cache_hits || aggr->cache_adds)
+    {
+      vty_out (vty, "%20s:\t%lu%s", "Cache hits (#)",
+               aggr->cache_hits, VTY_NEWLINE);
+      vty_out (vty, "%20s:\t%s%s", "Cache hits",
+               mtype_memstr (buf, sizeof(buf), aggr->cache_hitsb), VTY_NEWLINE);
+      vty_out (vty, "%20s:\t%lu%s", "Cache adds",
+               aggr->cache_adds, VTY_NEWLINE);
+    }
+}
+
 static int
-show_memory_vty (struct vty *vty, struct memory_list *list)
+show_memory_vty (struct vty *vty, struct memory_list *list,
+                 struct aggregate_stats *aggr)
 {
   struct memory_list *m;
   int needsep = 0;
 
-  show_memory_vty_header (vty);
-  
   for (m = list; m->index >= 0; m++)
     if (m->index == 0)
       {
@@ -703,6 +744,9 @@ show_memory_vty (struct vty *vty, struct memory_list *list)
 #endif
              )
       {
+        aggr->cached += mstat[m->index].cache_used
+                        * mstat[m->index].cached_size;
+        
         vty_out (vty, "%-28s | %10lu | %10d | %11lu | %7s%s", 
                  m->format, 
                  mstat[m->index].alloc,
@@ -713,34 +757,55 @@ show_memory_vty (struct vty *vty, struct memory_list *list)
                  VTY_NEWLINE);
 #if (MTYPE_EXTRA_STATS > 0)
           {
+            
             long int diff = mstat[m->index].alloc
                             - (mstat[m->index].st_strdup
                                + mstat[m->index].st_calloc
                                + mstat[m->index].st_malloc
                                - mstat[m->index].st_free);
             
-            vty_out (vty, "%28s | %10lu | %10lu | %11lu |%s",
-                    "malloc | calloc | realloc",
+            aggr->allocs += mstat[m->index].st_strdup
+                            + mstat[m->index].st_calloc
+                            + mstat[m->index].st_malloc;
+            aggr->allocb += (mstat[m->index].st_strdup
+                             + mstat[m->index].st_calloc
+                             + mstat[m->index].st_malloc)
+                            * mstat[m->index].cached_size;
+            aggr->frees += mstat[m->index].st_free;
+            aggr->cache_hits += mstat[m->index].st_cache_hit;
+            aggr->cache_hitsb += mstat[m->index].st_cache_hit
+                                 * mstat[m->index].cached_size;
+            aggr->cache_adds += mstat[m->index].st_cache_add;
+            
+            vty_out (vty, "%-28s | %10lu | %10lu | %11lu |%s",
+                    "   malloc | calloc |  free",
                     mstat[m->index].st_malloc,
                     mstat[m->index].st_calloc,
-                    mstat[m->index].st_realloc,
-                    VTY_NEWLINE);
-            vty_out (vty, "%-28s | %10lu | %10lu | %11ld |%s",
-                    "   strdup |  free  |  diff",
-                    mstat[m->index].st_strdup,
                     mstat[m->index].st_free,
-                    diff,
                     VTY_NEWLINE);
-            vty_out (vty, "%-28s | %10lu | %10lu |%s",
-                    "cache hit |   add  |",
-                    mstat[m->index].st_cache_hit,
-                    mstat[m->index].st_cache_add,
-                    VTY_NEWLINE);
-            vty_out (vty, "%-28s | %10lu | %10lu |%s",
-                    "    inval | reval  |",
-                    mstat[m->index].st_cache_invalidated,
-                    mstat[m->index].st_cache_revalidated,
-                    VTY_NEWLINE);
+            if (mstat[m->index].st_strdup
+                || mstat[m->index].st_realloc
+                || diff)
+              vty_out (vty, "%-28s | %10lu | %10lu | %11ld |%s",
+                       "   strdup | realloc|  diff",
+                       mstat[m->index].st_strdup,
+                       mstat[m->index].st_realloc,
+                       diff,
+                       VTY_NEWLINE);
+            if (mstat[m->index].st_cache_hit
+                || mstat[m->index].st_cache_add)
+              vty_out (vty, "%-28s | %10lu | %10lu |%s",
+                       "cache hit |   add  |",
+                       mstat[m->index].st_cache_hit,
+                       mstat[m->index].st_cache_add,
+                       VTY_NEWLINE);
+            if (mstat[m->index].st_cache_invalidated
+                || mstat[m->index].st_cache_revalidated)
+              vty_out (vty, "%-28s | %10lu | %10lu |%s",
+                       "    inval | reval  |",
+                       mstat[m->index].st_cache_invalidated,
+                       mstat[m->index].st_cache_revalidated,
+                       VTY_NEWLINE);
           }
 #endif /* MTYPE_EXTRA_STATS */
 
@@ -813,21 +878,38 @@ DEFUN (show_memory_all,
 {
   struct mlist *ml;
   int needsep = 0;
+  struct aggregate_stats aggr;
   
+  memset (&aggr, 0, sizeof (struct aggregate_stats));
+    
 #ifdef HAVE_MALLINFO
   needsep = show_memory_mallinfo (vty);
 #endif /* HAVE_MALLINFO */
+  
+  show_memory_vty_header (vty);
   
   for (ml = mlists; ml->list; ml++)
     {
       if (needsep)
 	show_separator (vty);
-      needsep = show_memory_vty (vty, ml->list);
+      needsep = show_memory_vty (vty, ml->list, &aggr);
     }
 
+  show_aggregate_stats_vty (vty, &aggr);
   return CMD_SUCCESS;
 }
 
+static void
+show_memory_list_vty (struct vty *vty, struct memory_list *list)
+{
+  struct aggregate_stats aggr;
+  
+  memset (&aggr, 0, sizeof (struct aggregate_stats));
+  
+  show_memory_vty_header (vty);
+  show_memory_vty (vty, list, &aggr);
+  show_aggregate_stats_vty (vty, &aggr);
+}
 ALIAS (show_memory_all,
        show_memory_cmd,
        "show memory",
@@ -841,7 +923,7 @@ DEFUN (show_memory_lib,
        "Memory statistics\n"
        "Library memory\n")
 {
-  show_memory_vty (vty, memory_list_lib);
+  show_memory_list_vty (vty, memory_list_lib);  
   return CMD_SUCCESS;
 }
 
@@ -852,7 +934,7 @@ DEFUN (show_memory_zebra,
        "Memory statistics\n"
        "Zebra memory\n")
 {
-  show_memory_vty (vty, memory_list_zebra);
+  show_memory_list_vty (vty, memory_list_zebra);
   return CMD_SUCCESS;
 }
 
@@ -863,7 +945,7 @@ DEFUN (show_memory_rip,
        "Memory statistics\n"
        "RIP memory\n")
 {
-  show_memory_vty (vty, memory_list_rip);
+  show_memory_list_vty (vty, memory_list_rip);
   return CMD_SUCCESS;
 }
 
@@ -874,7 +956,7 @@ DEFUN (show_memory_ripng,
        "Memory statistics\n"
        "RIPng memory\n")
 {
-  show_memory_vty (vty, memory_list_ripng);
+  show_memory_list_vty (vty, memory_list_ripng);
   return CMD_SUCCESS;
 }
 
@@ -885,7 +967,7 @@ DEFUN (show_memory_bgp,
        "Memory statistics\n"
        "BGP memory\n")
 {
-  show_memory_vty (vty, memory_list_bgp);
+  show_memory_list_vty (vty, memory_list_bgp);
   return CMD_SUCCESS;
 }
 
@@ -896,7 +978,7 @@ DEFUN (show_memory_ospf,
        "Memory statistics\n"
        "OSPF memory\n")
 {
-  show_memory_vty (vty, memory_list_ospf);
+  show_memory_list_vty (vty, memory_list_ospf);
   return CMD_SUCCESS;
 }
 
@@ -907,7 +989,7 @@ DEFUN (show_memory_ospf6,
        "Memory statistics\n"
        "OSPF6 memory\n")
 {
-  show_memory_vty (vty, memory_list_ospf6);
+  show_memory_list_vty (vty, memory_list_ospf6);
   return CMD_SUCCESS;
 }
 
@@ -918,7 +1000,7 @@ DEFUN (show_memory_isis,
        "Memory statistics\n"
        "ISIS memory\n")
 {
-  show_memory_vty (vty, memory_list_isis);
+  show_memory_list_vty (vty, memory_list_isis);
   return CMD_SUCCESS;
 }
 
