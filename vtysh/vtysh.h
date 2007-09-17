@@ -30,7 +30,7 @@
 #define VTYSH_BGPD   0x20
 #define VTYSH_ISISD  0x40
 #define VTYSH_ALL	  VTYSH_ZEBRA|VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D|VTYSH_BGPD|VTYSH_ISISD
-#define VTYSH_RMAP	  VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D|VTYSH_BGPD
+#define VTYSH_RMAP	  VTYSH_ZEBRA|VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D|VTYSH_BGPD
 #define VTYSH_INTERFACE	  VTYSH_ZEBRA|VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D|VTYSH_ISISD
 
 /* vtysh local configuration file. */
@@ -38,7 +38,7 @@
 
 void vtysh_init_vty (void);
 void vtysh_init_cmd (void);
-void vtysh_connect_all (void);
+extern int vtysh_connect_all (const char *optional_daemon_name);
 void vtysh_readline_init (void);
 void vtysh_user_init (void);
 

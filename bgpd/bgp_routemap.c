@@ -87,13 +87,105 @@ o Cisco route-map
       origin            :  Done
       tag               :  (This will not be implemented by bgpd)
       weight            :  Done
+      pathlimit		:  Done
 
 o Local extention
 
   set ipv6 next-hop global: Done
   set ipv6 next-hop local : Done
+  set pathlimit ttl       : Done
+  match pathlimit as     : Done
 
 */ 
+
+/* Compiles either AS or TTL argument. It is amused the VTY code
+ * has already range-checked the values to be suitable as TTL or ASN
+ */
+static void *
+route_pathlimit_compile (const char *arg)
+{
+  unsigned long tmp;
+  u_int32_t *val;
+  char *endptr = NULL;
+
+  /* TTL or AS value shoud be integer. */
+  if (! all_digit (arg))
+    return NULL;
+  
+  tmp = strtoul (arg, &endptr, 10);
+  if (*endptr != '\0' || tmp == ULONG_MAX || tmp > UINT32_MAX)
+    return NULL;
+   
+  if (!(val = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof (u_int32_t))))
+    return NULL;
+  
+  *val = tmp;
+  
+  return val;
+}
+
+static void
+route_pathlimit_free (void *rule)
+{
+  XFREE (MTYPE_ROUTE_MAP_COMPILED, rule);
+}
+
+static route_map_result_t
+route_match_pathlimit_as (void *rule, struct prefix *prefix, route_map_object_t type,
+      void *object)
+{
+  struct bgp_info *info = object;
+  struct attr *attr = info->attr;
+  uint32_t as = *(uint32_t *)rule;
+  
+  if (type != RMAP_BGP)
+    return RMAP_NOMATCH;
+  
+  if (!attr->pathlimit.as)
+    return RMAP_NOMATCH;
+  
+  if (as == attr->pathlimit.as)
+    return RMAP_MATCH;
+  
+  return RMAP_NOMATCH;
+}
+
+/* 'match pathlimit as' */
+struct route_map_rule_cmd route_match_pathlimit_as_cmd =
+{
+  "pathlimit as",
+  route_match_pathlimit_as,
+  route_pathlimit_compile,
+  route_pathlimit_free
+};
+
+/* Set pathlimit TTL. */
+static route_map_result_t
+route_set_pathlimit_ttl (void *rule, struct prefix *prefix,
+		         route_map_object_t type, void *object)
+{
+  struct bgp_info *info = object;
+  struct attr *attr = info->attr;
+  u_char ttl = *(uint32_t *)rule;
+  
+  if (type == RMAP_BGP)
+    {
+      attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_AS_PATHLIMIT);
+      attr->pathlimit.ttl = ttl;
+      attr->pathlimit.as = 0;
+    }
+
+  return RMAP_OKAY;
+}
+
+/* Set local preference rule structure. */
+struct route_map_rule_cmd route_set_pathlimit_ttl_cmd = 
+{
+  "pathlimit ttl",
+  route_set_pathlimit_ttl,
+  route_pathlimit_compile,
+  route_pathlimit_free,
+};
 
  /* 'match peer (A.B.C.D|X:X::X:X)' */
 
@@ -692,13 +784,16 @@ route_match_ecommunity (void *rule, struct prefix *prefix,
   if (type == RMAP_BGP) 
     {
       bgp_info = object;
-
+      
+      if (!bgp_info->attr->extra)
+        return RMAP_NOMATCH;
+      
       list = community_list_lookup (bgp_clist, (char *) rule,
 				    EXTCOMMUNITY_LIST_MASTER);
       if (! list)
 	return RMAP_NOMATCH;
 
-      if (ecommunity_list_match (bgp_info->attr->ecommunity, list))
+      if (ecommunity_list_match (bgp_info->attr->extra->ecommunity, list))
 	return RMAP_MATCH;
     }
   return RMAP_NOMATCH;
@@ -973,7 +1068,10 @@ route_set_weight (void *rule, struct prefix *prefix, route_map_object_t type,
       bgp_info = object;
     
       /* Set weight value. */ 
-      bgp_info->attr->weight = *weight;
+      if (*weight)
+        (bgp_attr_extra_get (bgp_info->attr))->weight = *weight;
+      else if (bgp_info->attr->extra)
+        bgp_info->attr->extra->weight = 0;
     }
 
   return RMAP_OKAY;
@@ -1402,14 +1500,14 @@ route_set_ecommunity_rt (void *rule, struct prefix *prefix,
 	return RMAP_OKAY;
     
       /* We assume additive for Extended Community. */
-      old_ecom = bgp_info->attr->ecommunity;
+      old_ecom = (bgp_attr_extra_get (bgp_info->attr))->ecommunity;
 
       if (old_ecom)
 	new_ecom = ecommunity_merge (ecommunity_dup (old_ecom), ecom);
       else
 	new_ecom = ecommunity_dup (ecom);
 
-      bgp_info->attr->ecommunity = new_ecom;
+      bgp_info->attr->extra->ecommunity = new_ecom;
 
       if (old_ecom)
 	ecommunity_free (old_ecom);
@@ -1467,7 +1565,7 @@ route_set_ecommunity_soo (void *rule, struct prefix *prefix,
 	return RMAP_OKAY;
     
       bgp_info->attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_EXT_COMMUNITIES);
-      bgp_info->attr->ecommunity = ecommunity_dup (ecom);
+      (bgp_attr_extra_get (bgp_info->attr))->ecommunity = ecommunity_dup (ecom);
     }
   return RMAP_OKAY;
 }
@@ -1610,14 +1708,16 @@ route_set_aggregator_as (void *rule, struct prefix *prefix,
 {
   struct bgp_info *bgp_info;
   struct aggregator *aggregator;
+  struct attr_extra *ae;
 
   if (type == RMAP_BGP)
     {
       bgp_info = object;
       aggregator = rule;
-    
-      bgp_info->attr->aggregator_as = aggregator->as;
-      bgp_info->attr->aggregator_addr = aggregator->address;
+      ae = bgp_attr_extra_get (bgp_info->attr);
+      
+      ae->aggregator_as = aggregator->as;
+      ae->aggregator_addr = aggregator->address;
       bgp_info->attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_AGGREGATOR);
     }
 
@@ -1711,12 +1811,15 @@ route_match_ipv6_next_hop (void *rule, struct prefix *prefix,
     {
       addr = rule;
       bgp_info = object;
-    
-      if (IPV6_ADDR_SAME (&bgp_info->attr->mp_nexthop_global, rule))
+      
+      if (!bgp_info->attr->extra)
+        return RMAP_NOMATCH;
+      
+      if (IPV6_ADDR_SAME (&bgp_info->attr->extra->mp_nexthop_global, rule))
 	return RMAP_MATCH;
 
-      if (bgp_info->attr->mp_nexthop_len == 32 &&
-	  IPV6_ADDR_SAME (&bgp_info->attr->mp_nexthop_local, rule))
+      if (bgp_info->attr->extra->mp_nexthop_len == 32 &&
+	  IPV6_ADDR_SAME (&bgp_info->attr->extra->mp_nexthop_local, rule))
 	return RMAP_MATCH;
 
       return RMAP_NOMATCH;
@@ -1814,11 +1917,11 @@ route_set_ipv6_nexthop_global (void *rule, struct prefix *prefix,
       bgp_info = object;
     
       /* Set next hop value. */ 
-      bgp_info->attr->mp_nexthop_global = *address;
+      (bgp_attr_extra_get (bgp_info->attr))->mp_nexthop_global = *address;
     
       /* Set nexthop length. */
-      if (bgp_info->attr->mp_nexthop_len == 0)
-	bgp_info->attr->mp_nexthop_len = 16;
+      if (bgp_info->attr->extra->mp_nexthop_len == 0)
+	bgp_info->attr->extra->mp_nexthop_len = 16;
     }
 
   return RMAP_OKAY;
@@ -1878,11 +1981,11 @@ route_set_ipv6_nexthop_local (void *rule, struct prefix *prefix,
       bgp_info = object;
     
       /* Set next hop value. */ 
-      bgp_info->attr->mp_nexthop_local = *address;
+      (bgp_attr_extra_get (bgp_info->attr))->mp_nexthop_local = *address;
     
       /* Set nexthop length. */
-      if (bgp_info->attr->mp_nexthop_len != 32)
-	bgp_info->attr->mp_nexthop_len = 32;
+      if (bgp_info->attr->extra->mp_nexthop_len != 32)
+	bgp_info->attr->extra->mp_nexthop_len = 32;
     }
 
   return RMAP_OKAY;
@@ -1942,7 +2045,7 @@ route_set_vpnv4_nexthop (void *rule, struct prefix *prefix,
       bgp_info = object;
     
       /* Set next hop value. */ 
-      bgp_info->attr->mp_nexthop_global_in = *address;
+      (bgp_attr_extra_get (bgp_info->attr))->mp_nexthop_global_in = *address;
     }
 
   return RMAP_OKAY;
@@ -1997,7 +2100,7 @@ route_set_originator_id (void *rule, struct prefix *prefix, route_map_object_t t
       bgp_info = object;
     
       bgp_info->attr->flag |= ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID);
-      bgp_info->attr->originator_id = *address;
+      (bgp_attr_extra_get (bgp_info->attr))->originator_id = *address;
     }
 
   return RMAP_OKAY;
@@ -3527,6 +3630,70 @@ ALIAS (no_set_originator_id,
        "BGP originator ID attribute\n"
        "IP address of originator\n")
 
+DEFUN (set_pathlimit_ttl,
+       set_pathlimit_ttl_cmd,
+       "set pathlimit ttl <1-255>",
+       SET_STR
+       "BGP AS-Pathlimit attribute\n"
+       "Set AS-Path Hop-count TTL\n")
+{
+  return bgp_route_set_add (vty, vty->index, "pathlimit ttl", argv[0]);
+}
+
+DEFUN (no_set_pathlimit_ttl,
+       no_set_pathlimit_ttl_cmd,
+       "no set pathlimit ttl",
+       NO_STR
+       SET_STR
+       "BGP AS-Pathlimit attribute\n"
+       "Set AS-Path Hop-count TTL\n")
+{
+  if (argc == 0)
+    return bgp_route_set_delete (vty, vty->index, "pathlimit ttl", NULL);
+  
+  return bgp_route_set_delete (vty, vty->index, "pathlimit ttl", argv[0]);
+}
+
+ALIAS (no_set_pathlimit_ttl,
+       no_set_pathlimit_ttl_val_cmd,
+       "no set pathlimit ttl <1-255>",
+       NO_STR
+       MATCH_STR
+       "BGP AS-Pathlimit attribute\n"
+       "Set AS-Path Hop-count TTL\n")
+
+DEFUN (match_pathlimit_as,
+       match_pathlimit_as_cmd,
+       "match pathlimit as <1-65535>",
+       MATCH_STR
+       "BGP AS-Pathlimit attribute\n"
+       "Match Pathlimit AS number\n")
+{
+  return bgp_route_match_add (vty, vty->index, "pathlimit as", argv[0]);
+}
+
+DEFUN (no_match_pathlimit_as,
+       no_match_pathlimit_as_cmd,
+       "no match pathlimit as",
+       NO_STR
+       MATCH_STR
+       "BGP AS-Pathlimit attribute\n"
+       "Match Pathlimit AS number\n")
+{
+  if (argc == 0)
+    return bgp_route_match_delete (vty, vty->index, "pathlimit as", NULL);
+  
+  return bgp_route_match_delete (vty, vty->index, "pathlimit as", argv[0]);
+}
+
+ALIAS (no_match_pathlimit_as,
+       no_match_pathlimit_as_val_cmd,
+       "no match pathlimit as <1-65535>",
+       NO_STR
+       MATCH_STR
+       "BGP AS-Pathlimit attribute\n"
+       "Match Pathlimit ASN\n")
+
 
 /* Initialization of route map. */
 void
@@ -3660,7 +3827,7 @@ bgp_route_map_init (void)
   route_map_install_match (&route_match_ipv6_address_prefix_list_cmd);
   route_map_install_set (&route_set_ipv6_nexthop_global_cmd);
   route_map_install_set (&route_set_ipv6_nexthop_local_cmd);
-
+  
   install_element (RMAP_NODE, &match_ipv6_address_cmd);
   install_element (RMAP_NODE, &no_match_ipv6_address_cmd);
   install_element (RMAP_NODE, &match_ipv6_next_hop_cmd);
@@ -3674,4 +3841,15 @@ bgp_route_map_init (void)
   install_element (RMAP_NODE, &no_set_ipv6_nexthop_local_cmd);
   install_element (RMAP_NODE, &no_set_ipv6_nexthop_local_val_cmd);
 #endif /* HAVE_IPV6 */
+
+  /* AS-Pathlimit */
+  route_map_install_match (&route_match_pathlimit_as_cmd);
+  route_map_install_set (&route_set_pathlimit_ttl_cmd);
+
+  install_element (RMAP_NODE, &set_pathlimit_ttl_cmd);
+  install_element (RMAP_NODE, &no_set_pathlimit_ttl_cmd);
+  install_element (RMAP_NODE, &no_set_pathlimit_ttl_val_cmd);
+  install_element (RMAP_NODE, &match_pathlimit_as_cmd);
+  install_element (RMAP_NODE, &no_match_pathlimit_as_cmd);
+  install_element (RMAP_NODE, &no_match_pathlimit_as_val_cmd);
 }

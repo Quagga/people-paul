@@ -43,6 +43,7 @@ unsigned long conf_bgp_debug_filter;
 unsigned long conf_bgp_debug_keepalive;
 unsigned long conf_bgp_debug_update;
 unsigned long conf_bgp_debug_normal;
+unsigned long conf_bgp_debug_zebra;
 
 unsigned long term_bgp_debug_fsm;
 unsigned long term_bgp_debug_events;
@@ -51,6 +52,7 @@ unsigned long term_bgp_debug_filter;
 unsigned long term_bgp_debug_keepalive;
 unsigned long term_bgp_debug_update;
 unsigned long term_bgp_debug_normal;
+unsigned long term_bgp_debug_zebra;
 
 /* messages for BGP-4 status */
 struct message bgp_status_msg[] = 
@@ -62,6 +64,8 @@ struct message bgp_status_msg[] =
   { OpenSent, "OpenSent" },
   { OpenConfirm, "OpenConfirm" },
   { Established, "Established" },
+  { Clearing,    "Clearing"    },
+  { Deleted,     "Deleted"     },
 };
 int bgp_status_msg_max = BGP_STATUS_MAX;
 
@@ -172,20 +176,22 @@ bgp_dump_attr (struct peer *peer, struct attr *attr, char *buf, size_t size)
 	      bgp_origin_str[attr->origin]);
 
 #ifdef HAVE_IPV6
-  {
-    char addrbuf[BUFSIZ];
+  if (attr->extra)
+    {
+      char addrbuf[BUFSIZ];
 
-    /* Add MP case. */
-    if (attr->mp_nexthop_len == 16 || attr->mp_nexthop_len == 32)
-      snprintf (buf + strlen (buf), size - strlen (buf), ", mp_nexthop %s",
-		inet_ntop (AF_INET6, &attr->mp_nexthop_global, 
-			   addrbuf, BUFSIZ));
+      /* Add MP case. */
+      if (attr->extra->mp_nexthop_len == 16 
+          || attr->extra->mp_nexthop_len == 32)
+        snprintf (buf + strlen (buf), size - strlen (buf), ", mp_nexthop %s",
+                  inet_ntop (AF_INET6, &attr->extra->mp_nexthop_global, 
+                             addrbuf, BUFSIZ));
 
-    if (attr->mp_nexthop_len == 32)
-      snprintf (buf + strlen (buf), size - strlen (buf), "(%s)",
-		inet_ntop (AF_INET6, &attr->mp_nexthop_local, 
-			   addrbuf, BUFSIZ));
-  }
+      if (attr->extra->mp_nexthop_len == 32)
+        snprintf (buf + strlen (buf), size - strlen (buf), "(%s)",
+                  inet_ntop (AF_INET6, &attr->extra->mp_nexthop_local, 
+                             addrbuf, BUFSIZ));
+    }
 #endif /* HAVE_IPV6 */
 
   if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_LOCAL_PREF)))
@@ -205,20 +211,21 @@ bgp_dump_attr (struct peer *peer, struct attr *attr, char *buf, size_t size)
 
   if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_AGGREGATOR)))
     snprintf (buf + strlen (buf), size - strlen (buf), ", aggregated by %d %s",
-	      attr->aggregator_as, inet_ntoa (attr->aggregator_addr));
+	      attr->extra->aggregator_as,
+	      inet_ntoa (attr->extra->aggregator_addr));
 
   if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_ORIGINATOR_ID)))
     snprintf (buf + strlen (buf), size - strlen (buf), ", originator %s",
-	      inet_ntoa (attr->originator_id));
+	      inet_ntoa (attr->extra->originator_id));
 
   if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_CLUSTER_LIST)))
     {
       int i;
 
       snprintf (buf + strlen (buf), size - strlen (buf), ", clusterlist");
-      for (i = 0; i < attr->cluster->length / 4; i++)
+      for (i = 0; i < attr->extra->cluster->length / 4; i++)
 	snprintf (buf + strlen (buf), size - strlen (buf), " %s",
-		  inet_ntoa (attr->cluster->list[i]));
+		  inet_ntoa (attr->extra->cluster->list[i]));
     }
 
   if (CHECK_FLAG (attr->flag, ATTR_FLAG_BIT (BGP_ATTR_AS_PATH))) 
@@ -588,6 +595,49 @@ ALIAS (no_debug_bgp_normal,
        UNDEBUG_STR
        BGP_STR)
 
+DEFUN (debug_bgp_zebra,
+       debug_bgp_zebra_cmd,
+       "debug bgp zebra",
+       DEBUG_STR
+       BGP_STR
+       "BGP Zebra messages\n")
+{
+  if (vty->node == CONFIG_NODE)
+    DEBUG_ON (zebra, ZEBRA);
+  else
+    {
+      TERM_DEBUG_ON (zebra, ZEBRA);
+      vty_out (vty, "BGP zebra debugging is on%s", VTY_NEWLINE);
+    }
+  return CMD_SUCCESS;
+}
+
+DEFUN (no_debug_bgp_zebra,
+       no_debug_bgp_zebra_cmd,
+       "no debug bgp zebra",
+       NO_STR
+       DEBUG_STR
+       BGP_STR
+       "BGP Zebra messages\n")
+{
+  if (vty->node == CONFIG_NODE)
+    DEBUG_OFF (zebra, ZEBRA);
+  else
+    {
+      TERM_DEBUG_OFF (zebra, ZEBRA);
+      vty_out (vty, "BGP zebra debugging is off%s", VTY_NEWLINE);
+    }
+  return CMD_SUCCESS;
+}
+
+ALIAS (no_debug_bgp_zebra,
+       undebug_bgp_zebra_cmd,
+       "undebug bgp zebra",
+       UNDEBUG_STR
+       DEBUG_STR
+       BGP_STR
+       "BGP Zebra messages\n")
+
 DEFUN (no_debug_bgp_all,
        no_debug_bgp_all_cmd,
        "no debug all bgp",
@@ -603,6 +653,7 @@ DEFUN (no_debug_bgp_all,
   TERM_DEBUG_OFF (update, UPDATE_OUT);
   TERM_DEBUG_OFF (fsm, FSM);
   TERM_DEBUG_OFF (filter, FILTER);
+  TERM_DEBUG_OFF (zebra, ZEBRA);
   vty_out (vty, "All possible debugging has been turned off%s", VTY_NEWLINE);
       
   return CMD_SUCCESS;
@@ -640,6 +691,8 @@ DEFUN (show_debugging_bgp,
     vty_out (vty, "  BGP fsm debugging is on%s", VTY_NEWLINE);
   if (BGP_DEBUG (filter, FILTER))
     vty_out (vty, "  BGP filter debugging is on%s", VTY_NEWLINE);
+  if (BGP_DEBUG (zebra, ZEBRA))
+    vty_out (vty, "  BGP zebra debugging is on%s", VTY_NEWLINE);
   vty_out (vty, "%s", VTY_NEWLINE);
   return CMD_SUCCESS;
 }
@@ -695,6 +748,12 @@ bgp_config_write_debug (struct vty *vty)
       write++;
     }
 
+  if (CONF_BGP_DEBUG (zebra, ZEBRA))
+    {
+      vty_out (vty, "debug bgp zebra%s", VTY_NEWLINE);
+      write++;
+    }
+
   return write;
 }
 
@@ -726,6 +785,8 @@ bgp_debug_init (void)
   install_element (CONFIG_NODE, &debug_bgp_update_direct_cmd);
   install_element (ENABLE_NODE, &debug_bgp_normal_cmd);
   install_element (CONFIG_NODE, &debug_bgp_normal_cmd);
+  install_element (ENABLE_NODE, &debug_bgp_zebra_cmd);
+  install_element (CONFIG_NODE, &debug_bgp_zebra_cmd);
 
   install_element (ENABLE_NODE, &no_debug_bgp_fsm_cmd);
   install_element (ENABLE_NODE, &undebug_bgp_fsm_cmd);
@@ -745,6 +806,9 @@ bgp_debug_init (void)
   install_element (ENABLE_NODE, &no_debug_bgp_normal_cmd);
   install_element (ENABLE_NODE, &undebug_bgp_normal_cmd);
   install_element (CONFIG_NODE, &no_debug_bgp_normal_cmd);
+  install_element (ENABLE_NODE, &no_debug_bgp_zebra_cmd);
+  install_element (ENABLE_NODE, &undebug_bgp_zebra_cmd);
+  install_element (CONFIG_NODE, &no_debug_bgp_zebra_cmd);
   install_element (ENABLE_NODE, &no_debug_bgp_all_cmd);
   install_element (ENABLE_NODE, &undebug_bgp_all_cmd);
 }

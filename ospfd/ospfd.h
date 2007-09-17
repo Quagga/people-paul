@@ -129,6 +129,9 @@
 #define OSPF_LS_REFRESH_SHIFT       (60 * 15)
 #define OSPF_LS_REFRESH_JITTER      60
 
+/* Initial send buffer size for ospfd raw sending socket. */
+#define OSPF_SNDBUFLEN_DEFAULT           1024
+
 /* OSPF master for system wide configuration and variables. */
 struct ospf_master
 {
@@ -181,6 +184,8 @@ struct ospf
   u_char config;
 #define OSPF_RFC1583_COMPATIBLE         (1 << 0)
 #define OSPF_OPAQUE_CAPABLE		(1 << 2)
+#define OSPF_LOG_ADJACENCY_CHANGES	(1 << 3)
+#define OSPF_LOG_ADJACENCY_DETAIL	(1 << 4)
 
 #ifdef HAVE_OPAQUE_LSA
   /* Opaque-LSA administrative flags. */
@@ -214,6 +219,7 @@ struct ospf
   struct ospf_area *backbone;           /* Pointer to the Backbone Area. */
 
   struct list *oiflist;                 /* ospf interfaces */
+  u_char passive_interface_default;	/* passive-interface default */
 
   /* LSDB of AS-external-LSAs. */
   struct ospf_lsdb *lsdb;
@@ -263,6 +269,7 @@ struct ospf
   struct thread *t_write;
   struct thread *t_read;
   int fd;
+  int maxsndbuflen;
   struct stream *ibuf;
   struct list *oi_write_q;
   

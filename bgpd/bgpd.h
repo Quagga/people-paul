@@ -52,6 +52,7 @@ struct bgp_master
 #define BGP_OPT_NO_FIB                   (1 << 0)
 #define BGP_OPT_MULTIPLE_INSTANCE        (1 << 1)
 #define BGP_OPT_CONFIG_CISCO             (1 << 2)
+#define BGP_OPT_ALWAYS_OPEN		 (1 << 3)
 };
 
 /* BGP instance structure.  */
@@ -386,7 +387,6 @@ struct peer
 #define PEER_STATUS_GROUP             (1 << 4) /* peer-group conf */
 #define PEER_STATUS_NSF_MODE          (1 << 5) /* NSF aware peer */
 #define PEER_STATUS_NSF_WAIT          (1 << 6) /* wait comeback peer */
-#define PEER_STATUS_CLEARING          (1 << 7) /* peers table being cleared */
 
   /* Peer status af flags (reset in bgp_stop) */
   u_int16_t af_sflags[AFI_MAX][SAFI_MAX];
@@ -592,6 +592,7 @@ struct bgp_nlri
 #define BGP_ATTR_MP_REACH_NLRI                  14
 #define BGP_ATTR_MP_UNREACH_NLRI                15
 #define BGP_ATTR_EXT_COMMUNITIES                16
+#define BGP_ATTR_AS_PATHLIMIT                   21
 
 /* BGP update origin.  */
 #define BGP_ORIGIN_IGP                           0
@@ -662,7 +663,9 @@ struct bgp_nlri
 #define OpenSent                                 4
 #define OpenConfirm                              5
 #define Established                              6
-#define BGP_STATUS_MAX                           7
+#define Clearing                                 7
+#define Deleted                                  8
+#define BGP_STATUS_MAX                           9
 
 /* BGP finite state machine events.  */
 #define BGP_Start                                1
@@ -678,7 +681,8 @@ struct bgp_nlri
 #define Receive_KEEPALIVE_message               11
 #define Receive_UPDATE_message                  12
 #define Receive_NOTIFICATION_message            13
-#define BGP_EVENTS_MAX                          14
+#define Clearing_Completed                      14
+#define BGP_EVENTS_MAX                          15
 
 /* BGP timers default value.  */
 #define BGP_INIT_START_TIMER                     5
@@ -739,13 +743,6 @@ enum bgp_clear_type
 /* Macros. */
 #define BGP_INPUT(P)         ((P)->ibuf)
 #define BGP_INPUT_PNT(P)     (STREAM_PNT(BGP_INPUT(P)))
-
-/* Macro to check BGP information is alive or not.  */
-#define BGP_INFO_HOLDDOWN(BI)                         \
-  (! CHECK_FLAG ((BI)->flags, BGP_INFO_VALID)         \
-   || CHECK_FLAG ((BI)->flags, BGP_INFO_HISTORY)      \
-   || CHECK_FLAG ((BI)->flags, BGP_INFO_DAMPED)       \
-   || CHECK_FLAG ((BI)->flags, BGP_INFO_REMOVED))
 
 /* Count prefix size from mask length */
 #define PSIZE(a) (((a) + 7) / (8))

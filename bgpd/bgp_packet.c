@@ -158,14 +158,14 @@ bgp_update_packet (struct peer *peer, afi_t afi, safi_t safi)
 
   while (adv)
     {
-      if (adv->rn)
-        rn = adv->rn;
+      assert (adv->rn);
+      rn = adv->rn;
       adj = adv->adj;
       if (adv->binfo)
         binfo = adv->binfo;
 
       /* When remaining space can't include NLRI and it's length.  */
-      if (rn && STREAM_REMAIN (s) <= BGP_NLRI_LENGTH + PSIZE (rn->p.prefixlen))
+      if (STREAM_REMAIN (s) <= BGP_NLRI_LENGTH + PSIZE (rn->p.prefixlen))
 	break;
 
       /* If packet is empty, set attribute. */
@@ -173,11 +173,15 @@ bgp_update_packet (struct peer *peer, afi_t afi, safi_t safi)
 	{
 	  struct prefix_rd *prd = NULL;
 	  u_char *tag = NULL;
+	  struct peer *from = NULL;
 	  
 	  if (rn->prn)
 	    prd = (struct prefix_rd *) &rn->prn->p;
-          if (binfo)
-            tag = binfo->tag;
+          if (binfo && binfo->extra)
+            {
+              tag = binfo->extra->tag;
+              from = binfo->peer;
+            }
           
 	  bgp_packet_set_marker (s, BGP_MSG_UPDATE);
 	  stream_putw (s, 0);		
@@ -186,7 +190,7 @@ bgp_update_packet (struct peer *peer, afi_t afi, safi_t safi)
 	  total_attr_len = bgp_packet_attribute (NULL, peer, s, 
 	                                         adv->baa->attr,
 	                                         &rn->p, afi, safi, 
-	                                         binfo->peer, prd, tag);
+	                                         from, prd, tag);
 	  stream_putw_at (s, pos, total_attr_len);
 	}
 
@@ -288,6 +292,7 @@ bgp_withdraw_packet (struct peer *peer, afi_t afi, safi_t safi)
 
   while ((adv = FIFO_HEAD (&peer->sync[afi][safi]->withdraw)) != NULL)
     {
+      assert (adv->rn);
       adj = adv->adj;
       rn = adv->rn;
 
@@ -637,9 +642,7 @@ bgp_write (struct thread *thread)
 	  if (write_errno == EWOULDBLOCK || write_errno == EAGAIN)
 	      break;
 
-	  BGP_EVENT_ADD (peer, BGP_Stop);
-	  peer->status = Idle;
-	  bgp_timer_set (peer);
+	  BGP_EVENT_ADD (peer, TCP_fatal_error);
 	  return 0;
 	}
       if (num != writenum)
@@ -673,10 +676,8 @@ bgp_write (struct thread *thread)
 	  if (peer->v_start >= (60 * 2))
 	    peer->v_start = (60 * 2);
 
+	  /* Flush any existing events */
 	  BGP_EVENT_ADD (peer, BGP_Stop);
-	  /*bgp_stop (peer);*/
-	  peer->status = Idle;
-	  bgp_timer_set (peer);
 	  return 0;
 	case BGP_MSG_KEEPALIVE:
 	  peer->keepalive_out++;
@@ -721,9 +722,7 @@ bgp_write_notify (struct peer *peer)
   ret = writen (peer->fd, STREAM_DATA (s), stream_get_endp (s));
   if (ret <= 0)
     {
-      BGP_EVENT_ADD (peer, BGP_Stop);
-      peer->status = Idle;
-      bgp_timer_set (peer);
+      BGP_EVENT_ADD (peer, TCP_fatal_error);
       return 0;
     }
 
@@ -743,10 +742,7 @@ bgp_write_notify (struct peer *peer)
   if (peer->v_start >= (60 * 2))
     peer->v_start = (60 * 2);
 
-  /* We don't call event manager at here for avoiding other events. */
-  bgp_stop (peer);
-  peer->status = Idle;
-  bgp_timer_set (peer);
+  BGP_EVENT_ADD (peer, BGP_Stop);
 
   return 0;
 }
@@ -1375,8 +1371,6 @@ bgp_open_receive (struct peer *peer, bgp_size_t size)
       ret = bgp_open_option_parse (peer, optlen, &capability);
       if (ret < 0)
 	return ret;
-
-      stream_forward_getp (peer->ibuf, optlen);
     }
   else
     {
@@ -1710,12 +1704,16 @@ bgp_update_receive (struct peer *peer, bgp_size_t size)
     aspath_unintern (attr.aspath);
   if (attr.community)
     community_unintern (attr.community);
-  if (attr.ecommunity)
-    ecommunity_unintern (attr.ecommunity);
-  if (attr.cluster)
-    cluster_unintern (attr.cluster);
-  if (attr.transit)
-    transit_unintern (attr.transit);
+  if (attr.extra)
+    {
+      if (attr.extra->ecommunity)
+        ecommunity_unintern (attr.extra->ecommunity);
+      if (attr.extra->cluster)
+        cluster_unintern (attr.extra->cluster);
+      if (attr.extra->transit)
+        transit_unintern (attr.extra->transit);
+      bgp_attr_extra_free (&attr);
+    }
 
   /* If peering is stopped due to some reason, do not generate BGP
      event.  */
@@ -1991,7 +1989,8 @@ static int
 bgp_capability_msg_parse (struct peer *peer, u_char *pnt, bgp_size_t length)
 {
   u_char *end;
-  struct capability cap;
+  struct capability_mp_data mpc;
+  struct capability_header *hdr;
   u_char action;
   struct bgp *bgp;
   afi_t afi;
@@ -2001,7 +2000,7 @@ bgp_capability_msg_parse (struct peer *peer, u_char *pnt, bgp_size_t length)
   end = pnt + length;
 
   while (pnt < end)
-    {
+    {      
       /* We need at least action, capability code and capability length. */
       if (pnt + 3 > end)
         {
@@ -2009,12 +2008,9 @@ bgp_capability_msg_parse (struct peer *peer, u_char *pnt, bgp_size_t length)
           bgp_notify_send (peer, BGP_NOTIFY_CEASE, 0);
           return -1;
         }
-
       action = *pnt;
-
-      /* Fetch structure to the byte stream. */
-      memcpy (&cap, pnt + 1, sizeof (struct capability));
-
+      hdr = (struct capability_header *)(pnt + 1);
+      
       /* Action value check.  */
       if (action != CAPABILITY_ACTION_SET
 	  && action != CAPABILITY_ACTION_UNSET)
@@ -2027,77 +2023,77 @@ bgp_capability_msg_parse (struct peer *peer, u_char *pnt, bgp_size_t length)
 
       if (BGP_DEBUG (normal, NORMAL))
 	zlog_debug ("%s CAPABILITY has action: %d, code: %u, length %u",
-		   peer->host, action, cap.code, cap.length);
+		   peer->host, action, hdr->code, hdr->length);
 
       /* Capability length check. */
-      if (pnt + (cap.length + 3) > end)
+      if ((pnt + hdr->length + 3) > end)
         {
           zlog_info ("%s Capability length error", peer->host);
           bgp_notify_send (peer, BGP_NOTIFY_CEASE, 0);
           return -1;
         }
 
+      /* Fetch structure to the byte stream. */
+      memcpy (&mpc, pnt + 3, sizeof (struct capability_mp_data));
+
       /* We know MP Capability Code. */
-      if (cap.code == CAPABILITY_CODE_MP)
+      if (hdr->code == CAPABILITY_CODE_MP)
         {
-	  afi = ntohs (cap.mpc.afi);
-	  safi = cap.mpc.safi;
+	  afi = ntohs (mpc.afi);
+	  safi = mpc.safi;
 
           /* Ignore capability when override-capability is set. */
           if (CHECK_FLAG (peer->flags, PEER_FLAG_OVERRIDE_CAPABILITY))
 	    continue;
-
+          
+          if (!bgp_afi_safi_valid_indices (afi, &safi))
+            {
+              if (BGP_DEBUG (normal, NORMAL))
+                zlog_debug ("%s Dynamic Capability MP_EXT afi/safi invalid",
+                            peer->host, afi, safi);
+              continue;
+            }
+          
 	  /* Address family check.  */
-	  if ((afi == AFI_IP 
-	       || afi == AFI_IP6)
-	      && (safi == SAFI_UNICAST 
-		  || safi == SAFI_MULTICAST 
-		  || safi == BGP_SAFI_VPNV4))
-	    {
-	      if (BGP_DEBUG (normal, NORMAL))
-		zlog_debug ("%s CAPABILITY has %s MP_EXT CAP for afi/safi: %u/%u",
-			   peer->host,
-			   action == CAPABILITY_ACTION_SET 
-			   ? "Advertising" : "Removing",
-			   ntohs(cap.mpc.afi) , cap.mpc.safi);
-		  
-	      /* Adjust safi code. */
-	      if (safi == BGP_SAFI_VPNV4)
-		safi = SAFI_MPLS_VPN;
-	      
-	      if (action == CAPABILITY_ACTION_SET)
-		{
-		  peer->afc_recv[afi][safi] = 1;
-		  if (peer->afc[afi][safi])
-		    {
-		      peer->afc_nego[afi][safi] = 1;
-		      bgp_announce_route (peer, afi, safi);
-		    }
-		}
-	      else
-		{
-		  peer->afc_recv[afi][safi] = 0;
-		  peer->afc_nego[afi][safi] = 0;
+          if (BGP_DEBUG (normal, NORMAL))
+            zlog_debug ("%s CAPABILITY has %s MP_EXT CAP for afi/safi: %u/%u",
+                       peer->host,
+                       action == CAPABILITY_ACTION_SET 
+                       ? "Advertising" : "Removing",
+                       ntohs(mpc.afi) , mpc.safi);
+              
+          if (action == CAPABILITY_ACTION_SET)
+            {
+              peer->afc_recv[afi][safi] = 1;
+              if (peer->afc[afi][safi])
+                {
+                  peer->afc_nego[afi][safi] = 1;
+                  bgp_announce_route (peer, afi, safi);
+                }
+            }
+          else
+            {
+              peer->afc_recv[afi][safi] = 0;
+              peer->afc_nego[afi][safi] = 0;
 
-		  if (peer_active_nego (peer))
-		    bgp_clear_route (peer, afi, safi);
-		  else
-		    BGP_EVENT_ADD (peer, BGP_Stop);
-		} 
-	    }
+              if (peer_active_nego (peer))
+                bgp_clear_route (peer, afi, safi);
+              else
+                BGP_EVENT_ADD (peer, BGP_Stop);
+            }
         }
       else
         {
           zlog_warn ("%s unrecognized capability code: %d - ignored",
-                     peer->host, cap.code);
+                     peer->host, hdr->code);
         }
-      pnt += cap.length + 3;
+      pnt += hdr->length + 3;
     }
   return 0;
 }
 
 /* Dynamic Capability is received. */
-static void
+int
 bgp_capability_receive (struct peer *peer, bgp_size_t size)
 {
   u_char *pnt;
@@ -2130,7 +2126,7 @@ bgp_capability_receive (struct peer *peer, bgp_size_t size)
     }
 
   /* Parse packet. */
-  ret = bgp_capability_msg_parse (peer, pnt, size);
+  return bgp_capability_msg_parse (peer, pnt, size);
 }
 
 /* BGP read utility function. */
@@ -2375,14 +2371,6 @@ bgp_read (struct thread *thread)
       if (BGP_DEBUG (events, EVENTS))
 	zlog_debug ("%s [Event] Accepting BGP peer delete", peer->host);
       peer_delete (peer);
-      /* we've lost track of a reference to ACCEPT_PEER somehow.  It doesnt
-       * _seem_ to be the 'update realpeer with accept peer' hack, yet it
-       * *must* be.. Very very odd, but I give up trying to
-       * root cause this - ACCEPT_PEER is a dirty hack, it should be fixed
-       * instead, which would make root-causing this a moot point..
-       * A hack because of a hack, appropriate.
-       */
-      peer_unlock (peer); /* god knows what reference... ACCEPT_PEER sucks */
     }
   return 0;
 }

@@ -29,6 +29,7 @@
 #include "memory.h"
 #include "prefix.h"
 #include "log.h"
+#include "plist.h"
 #include "privs.h"
 #include "sigevent.h"
 
@@ -76,6 +77,7 @@ struct option longopts[] =
   { "vty_addr",    required_argument, NULL, 'A'},
   { "vty_port",    required_argument, NULL, 'P'},
   { "retain",      no_argument,       NULL, 'r'},
+  { "dryrun",      no_argument,       NULL, 'C'},
 #ifdef HAVE_NETLINK
   { "nl-bufsize",  required_argument, NULL, 's'},
 #endif /* HAVE_NETLINK */
@@ -131,6 +133,7 @@ usage (char *progname, int status)
 	      "-k, --keep_kernel  Don't delete old routes which installed by "\
 				  "zebra.\n"\
 	      "-l, --log_mode     Set verbose log mode flag\n"\
+	      "-C, --dryrun       Check configuration for validity and exit\n"\
 	      "-A, --vty_addr     Set vty's bind address\n"\
 	      "-P, --vty_port     Set vty's port number\n"\
 	      "-r, --retain       When program terminates, retain added route "\
@@ -208,6 +211,7 @@ main (int argc, char **argv)
   char *p;
   char *vty_addr = NULL;
   int vty_port = ZEBRA_VTY_PORT;
+  int dryrun = 0;
   int batch_mode = 0;
   int daemon_mode = 0;
   char *config_file = NULL;
@@ -228,9 +232,9 @@ main (int argc, char **argv)
       int opt;
   
 #ifdef HAVE_NETLINK  
-      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vs:", longopts, 0);
+      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vs:C", longopts, 0);
 #else
-      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:v", longopts, 0);
+      opt = getopt_long (argc, argv, "bdklf:i:hA:P:ru:g:vC", longopts, 0);
 #endif /* HAVE_NETLINK */
 
       if (opt == EOF)
@@ -247,6 +251,9 @@ main (int argc, char **argv)
 	  break;
 	case 'k':
 	  keep_kernel_mode = 1;
+	  break;
+	case 'C':
+	  dryrun = 1;
 	  break;
 	case 'l':
 	  /* log_mode = 1; */
@@ -318,6 +325,7 @@ main (int argc, char **argv)
   router_id_init();
   zebra_vty_init ();
   access_list_init ();
+  prefix_list_init ();
   rtadv_init ();
 #ifdef HAVE_IRDP
   irdp_init();
@@ -345,6 +353,10 @@ main (int argc, char **argv)
   /* Configuration file read*/
   vty_read_config (config_file, config_default);
 
+  /* Don't start execution if we are in dry-run mode */
+  if (dryrun)
+    return(0);
+  
   /* Clean up rib. */
   rib_weed_tables ();
 

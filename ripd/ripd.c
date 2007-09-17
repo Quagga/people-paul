@@ -1352,9 +1352,9 @@ rip_create_socket (struct sockaddr_in *from)
     {
       addr.sin_family = AF_INET;
       addr.sin_addr.s_addr = INADDR_ANY;
-#ifdef HAVE_SINLEN
+#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
       addr.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_SINLEN */
+#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
     } else {
       memcpy(&addr, from, sizeof(addr));
     }
@@ -1457,9 +1457,9 @@ rip_send_packet (u_char * buf, int size, struct sockaddr_in *to,
   /* Make destination address. */
   memset (&sin, 0, sizeof (struct sockaddr_in));
   sin.sin_family = AF_INET;
-#ifdef HAVE_SIN_LEN
+#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
   sin.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_SIN_LEN */
+#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
 
   /* When destination is specified, use it's port and address. */
   if (to)
@@ -1479,9 +1479,9 @@ rip_send_packet (u_char * buf, int size, struct sockaddr_in *to,
       from.sin_family = AF_INET;
       from.sin_port = htons (RIP_PORT_DEFAULT);
       from.sin_addr = ifc->address->u.prefix4;
-#ifdef HAVE_SIN_LEN
+#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
       from.sin_len = sizeof (struct sockaddr_in);
-#endif /* HAVE_SIN_LEN */
+#endif /* HAVE_STRUCT_SOCKADDR_IN_SIN_LEN */
       
       /*
        * we have to open a new socket for each packet because this
@@ -1818,6 +1818,7 @@ rip_read (struct thread *t)
   struct rip_packet *packet;
   struct sockaddr_in from;
   int len;
+  int vrecv;
   socklen_t fromlen;
   struct interface *ifp;
   struct connected *ifc;
@@ -1937,8 +1938,8 @@ rip_read (struct thread *t)
     }
 
   /* RIP Version check. RFC2453, 4.6 and 5.1 */
-  int vrecv = ((ri->ri_receive == RI_RIP_UNSPEC) ?
-               rip->version_recv : ri->ri_receive);
+  vrecv = ((ri->ri_receive == RI_RIP_UNSPEC) ?
+           rip->version_recv : ri->ri_receive);
   if ((packet->version == RIPv1) && !(vrecv & RIPv1))
     {
       if (IS_RIP_DEBUG_PACKET)
@@ -2448,19 +2449,22 @@ rip_update_interface (struct connected *ifc, u_char version, int route_type)
           /* Destination address and port setting. */
           memset (&to, 0, sizeof (struct sockaddr_in));
           if (ifc->destination)
-            /* use specified broadcast or point-to-point destination addr */
+            /* use specified broadcast or peer destination addr */
             to.sin_addr = ifc->destination->u.prefix4;
-          else
+          else if (ifc->address->prefixlen < IPV4_MAX_PREFIXLEN)
             /* calculate the appropriate broadcast address */
             to.sin_addr.s_addr =
               ipv4_broadcast_addr(ifc->address->u.prefix4.s_addr,
                                   ifc->address->prefixlen);
+	  else
+	    /* do not know where to send the packet */
+	    return;
           to.sin_port = htons (RIP_PORT_DEFAULT);
 
           if (IS_RIP_DEBUG_EVENT)
-            zlog_debug ("%s announce to %s on %s",
-                       if_is_pointopoint (ifc->ifp) ? "unicast" : "broadcast",
-                       inet_ntoa (to.sin_addr), ifc->ifp->name);
+            zlog_debug("%s announce to %s on %s",
+		       CONNECTED_PEER(ifc) ? "unicast" : "broadcast",
+		       inet_ntoa (to.sin_addr), ifc->ifp->name);
 
           rip_output_process (ifc, &to, route_type, version);
         }
@@ -3374,25 +3378,22 @@ DEFUN (no_rip_distance_source_access_list,
 static void
 rip_vty_out_uptime (struct vty *vty, struct rip_info *rinfo)
 {
-  struct timeval timer_now;
   time_t clock;
   struct tm *tm;
 #define TIME_BUF 25
   char timebuf [TIME_BUF];
   struct thread *thread;
 
-  gettimeofday (&timer_now, NULL);
-
   if ((thread = rinfo->t_timeout) != NULL)
     {
-      clock = thread->u.sands.tv_sec - timer_now.tv_sec;
+      clock = thread_timer_remain_second (thread);
       tm = gmtime (&clock);
       strftime (timebuf, TIME_BUF, "%M:%S", tm);
       vty_out (vty, "%5s", timebuf);
     }
   else if ((thread = rinfo->t_garbage_collect) != NULL)
     {
-      clock = thread->u.sands.tv_sec - timer_now.tv_sec;
+      clock = thread_timer_remain_second (thread);
       tm = gmtime (&clock);
       strftime (timebuf, TIME_BUF, "%M:%S", tm);
       vty_out (vty, "%5s", timebuf);
@@ -3496,17 +3497,6 @@ DEFUN (show_ip_rip,
   return CMD_SUCCESS;
 }
 
-/* Return next event time. */
-static int
-rip_next_thread_timer (struct thread *thread)
-{
-  struct timeval timer_now;
-
-  gettimeofday (&timer_now, NULL);
-
-  return thread->u.sands.tv_sec - timer_now.tv_sec;
-}
-
 /* Vincent: formerly, it was show_ip_protocols_rip: "show ip protocols" */
 DEFUN (show_ip_rip_status,
        show_ip_rip_status_cmd,
@@ -3529,8 +3519,8 @@ DEFUN (show_ip_rip_status,
   vty_out (vty, "Routing Protocol is \"rip\"%s", VTY_NEWLINE);
   vty_out (vty, "  Sending updates every %ld seconds with +/-50%%,",
 	   rip->update_time);
-  vty_out (vty, " next due in %d seconds%s", 
-	   rip_next_thread_timer (rip->t_update),
+  vty_out (vty, " next due in %lu seconds%s", 
+	   thread_timer_remain_second(rip->t_update),
 	   VTY_NEWLINE);
   vty_out (vty, "  Timeout after %ld seconds,", rip->timeout_time);
   vty_out (vty, " garbage collect after %ld seconds%s", rip->garbage_time,

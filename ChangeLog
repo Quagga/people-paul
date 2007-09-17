@@ -1,3 +1,133 @@
+2007-09-07 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: Bump version to 0.99.9
+
+2007-08-07 James Carlson <james.d.carlson@sun.com>
+
+	* configure.ac: Added support for separate link-layer access
+	  mechanisms in isisd.
+
+2007-07-27 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: Bump version to 0.99.8
+
+2007-06-25 Hasso Tepper <hasso@quagga.net>
+
+	* configure.ac: Fix typo so it compiles again on BSD systems.
+
+2007-06-22 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: IRDP also depends on struct icmphdr, enabling
+	  only on in_pktinfo breaks when an OS acquires pktinfo, as
+	  Solaris NV has. Reported by Jim Carlson.
+
+2007-05-10 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: Add back check for inet_aton, which got dropped
+	  somehow in previous jumbo patch.
+	  Use AC_GNU_SOURCE to define _GNU_SOURCE, rather than having
+	  lib/zebra.h do it.
+	  AC_FUNC_STRNLEN has side-effects with latest autoconf, use 
+	  AC_CHECK_FUNC on strnlen instead.
+
+2007-05-09 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: sys/conf.h depends on sys/param.h, at least on
+	  FBSD 6.2.
+	  (bug #363) Should check for in_pktinfo for IRDP
+
+2006-05-27 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: General cleanup of header and type checks, introducing
+	  an internal define, QUAGGA_INCLUDES, to build up a list of
+	  stuff to include so as to avoid 'present but cant be compiled'
+	  warnings.
+	  Misc additional checks of things missing according to autoscan.
+	  Add LIBM, for bgpd's use of libm, so as to avoid burdening
+	  LIBS, and all the binaries, with libm linkage.
+	  Remove the bad practice of using m4 changequote(), just
+	  quote the []'s in the case statements properly.
+	  This should fix bugs 162, 303 and 178.
+	* */*.{c,h}: Update all HAVE_* to the standard autoconf namespaced
+	  HAVE_* defines. I.e. HAVE_SA_LEN -> HAVE_STRUCT_SOCKADDR_SA_LEN,
+	* bgpd/Makefile.am: Add LIBM to bgpd's LDADD, for pow().
+
+2007-04-30 Andrew J. Schorr <ajschorr@alumni.princeton.edu>
+
+	* configure.ac: Change gcc CFLAGS from '-std=c99' to '-std=gnu99'
+	  to improve portability.
+
+2007-04-29 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: Bump to 0.99.7
+
+2007-04-16  David Young  <dyoung@pobox.com>
+
+        * connected.c (zebra): Only suppress adding a connected
+          route to the kernel if it is already marked "real"
+          (ZEBRA_IFC_REAL), i.e., "in kernel."  According to Paul
+          Jakma, this probably fixes Quagga bug #202.
+
+2007-02-06  Greg Troxel  <Greg Troxel <gdt@ir.bbn.com>>
+
+	* configure.ac: Use generic sed test, since autoconf 2.59 lacks
+	AC_PROG_SED and while 2.59 is somewhat crufty, it isn't officially
+	crufty.
+
+2007-02-06  Greg Troxel  <Greg Troxel <gdt@ir.bbn.com>
+
+	* bootstrap.sh: use -i to install missing files
+
+2007-02-03  Greg Troxel  <Greg Troxel <gdt@ir.bbn.com>
+
+	* configure.ac: add AC_PROG_SED
+
+2007-02-02  Greg Troxel  <Greg Troxel <gdt@ir.bbn.com>
+
+	* README.NetBSD:  use bootstrap.sh instead of autoreconf
+	
+	* bootstrap.sh: new file with just 'autoreconf'
+
+	* update-autotools: print out tool name before invoking to aid debugging
+
+2006-12-08 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: Bump to 0.99.6
+
+2006-10-04 Oliver Hookins <ohookins@gmail.com>
+
+	* bgpd/bgp_main.c: Add configuration check option, with
+	'-C' rather than '-c' for consistency between daemons.
+	* isisd/isis_main.c: ditto
+	* ospf6d/ospf6_main.c: ditto
+	* ospfd/ospf_main.c: ditto
+	* ripngd/ripng_main.c: ditto
+	* vtysh/vtysh_main.c: ditto
+	* ripd/rip_main.c: Change the config check option to
+	'-C' and tidy up the code.
+	* zebra/main.c: ditto	
+
+2006-10-04 Stergiakis Alexandros <astergiakis@antcor.com>
+
+	* ripd/rip_main.c: This trivial patch introduces a new
+	  command-line option '-c', which instructs zebra/ripd
+	  to check its configuration file for validity,	print 
+	  any error message, and then exit. This is useful when
+	  the configuration file is edited by hand or otherwise,
+	  and you simply want to validate it without any other
+	  effect.
+	* zebra/main.c: ditto
+
+2006-08-27 Paul Jakma <paul.jakma@sun.com>
+
+	* configure.ac: Bump to 0.99.5
+
+2006-06-15 Andrew J. Schorr <ajschorr@alumni.princeton.edu>
+
+	* redhat/quagga.spec.in: Get default distro automatically
+	  by using rpm to query the fedora-release version.
+	  And fix a typo (should be default_dist, not dist_default).
+
 2006-05-28 Paul Jakma <paul.jakma@sun.com>
 
 	* configure.ac: Update SOS CFLAGS, Xt shouldn't be used and

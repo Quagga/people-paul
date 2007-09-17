@@ -63,6 +63,7 @@ extern unsigned long conf_bgp_debug_filter;
 extern unsigned long conf_bgp_debug_keepalive;
 extern unsigned long conf_bgp_debug_update;
 extern unsigned long conf_bgp_debug_normal;
+extern unsigned long conf_bgp_debug_zebra;
 
 extern unsigned long term_bgp_debug_fsm;
 extern unsigned long term_bgp_debug_events;
@@ -71,6 +72,7 @@ extern unsigned long term_bgp_debug_filter;
 extern unsigned long term_bgp_debug_keepalive;
 extern unsigned long term_bgp_debug_update;
 extern unsigned long term_bgp_debug_normal;
+extern unsigned long term_bgp_debug_zebra;
 
 #define BGP_DEBUG_FSM                 0x01
 #define BGP_DEBUG_EVENTS              0x01
@@ -80,6 +82,7 @@ extern unsigned long term_bgp_debug_normal;
 #define BGP_DEBUG_UPDATE_IN           0x01
 #define BGP_DEBUG_UPDATE_OUT          0x02
 #define BGP_DEBUG_NORMAL              0x01
+#define BGP_DEBUG_ZEBRA               0x01
 
 #define BGP_DEBUG_PACKET_SEND         0x01
 #define BGP_DEBUG_PACKET_SEND_DETAIL  0x02
@@ -107,7 +110,7 @@ extern unsigned long term_bgp_debug_normal;
 #define BGP_DEBUG(a, b)		(term_bgp_debug_ ## a & BGP_DEBUG_ ## b)
 #define CONF_BGP_DEBUG(a, b)    (conf_bgp_debug_ ## a & BGP_DEBUG_ ## b)
 
-const extern char *bgp_type_str[];
+extern const char *bgp_type_str[];
 
 extern int bgp_dump_attr (struct peer *, struct attr *, char *, size_t);
 extern void bgp_notify_print (struct peer *, struct bgp_notify *, const char *);

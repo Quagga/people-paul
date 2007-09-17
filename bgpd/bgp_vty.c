@@ -276,6 +276,28 @@ DEFUN (no_bgp_config_type,
   return CMD_SUCCESS;
 }
 
+DEFUN_HIDDEN (bgp_open_accept,
+              bgp_open_accept_cmd,
+              "bgp open-accept",
+              BGP_STR
+              "Send OPEN immediately on accepted connections\n")
+{
+  bgp_option_set (BGP_OPT_ALWAYS_OPEN);
+  return CMD_SUCCESS;
+}
+
+DEFUN_HIDDEN (no_bgp_open_accept,
+              no_bgp_open_accept_cmd,
+              "no bgp open-accept",
+              NO_STR
+              BGP_STR
+              "Send OPEN immediately on accepted connections\n")
+
+{
+  bgp_option_unset (BGP_OPT_ALWAYS_OPEN);
+  return CMD_SUCCESS;
+}
+
 DEFUN (no_synchronization,
        no_synchronization_cmd,
        "no synchronization",
@@ -6496,6 +6518,11 @@ DEFUN (show_bgp_memory,
            mtype_memstr (memstrbuf, sizeof (memstrbuf),
                          count * sizeof (struct bgp_info)),
            VTY_NEWLINE);
+  if ((count = mtype_stats_alloc (MTYPE_BGP_ROUTE_EXTRA)))
+    vty_out (vty, "%ld BGP route ancillaries, using %s of memory%s", count,
+             mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                           count * sizeof (struct bgp_info_extra)),
+             VTY_NEWLINE);
   
   if ((count = mtype_stats_alloc (MTYPE_BGP_STATIC)))
     vty_out (vty, "%ld Static routes, using %s of memory%s", count,
@@ -6533,6 +6560,11 @@ DEFUN (show_bgp_memory,
            mtype_memstr (memstrbuf, sizeof (memstrbuf), 
                          count * sizeof(struct attr)), 
            VTY_NEWLINE);
+  if ((count = mtype_stats_alloc (MTYPE_ATTR_EXTRA)))
+    vty_out (vty, "%ld BGP extra attributes, using %s of memory%s", count, 
+             mtype_memstr (memstrbuf, sizeof (memstrbuf), 
+                           count * sizeof(struct attr_extra)), 
+             VTY_NEWLINE);
   
   if ((count = attr_unknown_count()))
     vty_out (vty, "%ld unknown attributes%s", count, VTY_NEWLINE);
@@ -6671,14 +6703,14 @@ bgp_show_summary (struct vty *vty, struct bgp *bgp, int afi, int safi)
 
 	  vty_out (vty, "4 ");
 
-	  vty_out (vty, "%5d %7d %7d %8d %4d %4ld ",
+	  vty_out (vty, "%5d %7d %7d %8d %4d %4lu ",
 		   peer->as,
 		   peer->open_in + peer->update_in + peer->keepalive_in
 		   + peer->notify_in + peer->refresh_in + peer->dynamic_cap_in,
 		   peer->open_out + peer->update_out + peer->keepalive_out
 		   + peer->notify_out + peer->refresh_out
 		   + peer->dynamic_cap_out,
-		   0, 0, peer->obuf->count);
+		   0, 0, (unsigned long)peer->obuf->count);
 
 	  vty_out (vty, "%8s", 
 		   peer_uptime (peer->uptime, timebuf, BGP_UPTIME_LEN));
@@ -6693,8 +6725,6 @@ bgp_show_summary (struct vty *vty, struct bgp *bgp, int afi, int safi)
 		vty_out (vty, " Idle (Admin)");
 	      else if (CHECK_FLAG (peer->sflags, PEER_STATUS_PREFIX_OVERFLOW))
 		vty_out (vty, " Idle (PfxCt)");
-              else if (CHECK_FLAG (peer->sflags, PEER_STATUS_CLEARING))
-                vty_out (vty, " Idle (Clrng)");
 	      else
 		vty_out (vty, " %-11s", LOOKUP(bgp_status_msg, peer->status));
 	    }
@@ -7395,7 +7425,7 @@ bgp_show_peer (struct vty *vty, struct peer *p)
   /* Packet counts. */
   vty_out (vty, "  Message statistics:%s", VTY_NEWLINE);
   vty_out (vty, "    Inq depth is 0%s", VTY_NEWLINE);
-  vty_out (vty, "    Outq depth is %ld%s", p->obuf->count, VTY_NEWLINE);
+  vty_out (vty, "    Outq depth is %lu%s", (unsigned long)p->obuf->count, VTY_NEWLINE);
   vty_out (vty, "                         Sent       Rcvd%s", VTY_NEWLINE);
   vty_out (vty, "    Opens:         %10d %10d%s", p->open_out, p->open_in, VTY_NEWLINE);
   vty_out (vty, "    Notifications: %10d %10d%s", p->notify_out, p->notify_in, VTY_NEWLINE);
@@ -8767,6 +8797,10 @@ bgp_vty_init (void)
   /* "bgp config-type" commands. */
   install_element (CONFIG_NODE, &bgp_config_type_cmd);
   install_element (CONFIG_NODE, &no_bgp_config_type_cmd);
+
+  /* "bgp open-all" commands. */
+  install_element (CONFIG_NODE, &bgp_open_accept_cmd);
+  install_element (CONFIG_NODE, &no_bgp_open_accept_cmd);
 
   /* Dummy commands (Currently not supported) */
   install_element (BGP_NODE, &no_synchronization_cmd);

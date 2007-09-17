@@ -25,6 +25,7 @@
 
 #include "vector.h"
 #include "vty.h"
+#include "lib/route_types.h"
 
 /* Host configuration variable */
 struct host
@@ -98,6 +99,7 @@ enum node_type
   SMUX_NODE,			/* SNMP configuration node. */
   DUMP_NODE,			/* Packet dump node. */
   FORWARDING_NODE,		/* IP forwarding node. */
+  PROTOCOL_NODE,                /* protocol filtering node */
   VTY_NODE			/* Vty node. */
 };
 
@@ -271,6 +273,7 @@ struct desc
 #define IP_STR "IP information\n"
 #define IPV6_STR "IPv6 information\n"
 #define NO_STR "Negate a command or set its defaults\n"
+#define REDIST_STR "Redistribute information from another routing protocol\n"
 #define CLEAR_STR "Reset functions\n"
 #define RIP_STR "RIP information\n"
 #define BGP_STR "BGP information\n"

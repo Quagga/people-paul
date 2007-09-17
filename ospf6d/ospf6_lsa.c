@@ -717,7 +717,7 @@ ospf6_lsa_handler_name (struct ospf6_lsa_handler *h)
   unsigned int i; 
   unsigned int size = strlen (h->name);
 
-  if (h->name == "Unknown" &&
+  if (!strcmp(h->name, "Unknown") &&
       h->type != OSPF6_LSTYPE_UNKNOWN)
     {
       snprintf (buf, sizeof (buf), "%#04hx", h->type);
@@ -855,7 +855,7 @@ DEFUN (no_debug_ospf6_lsa_type,
     UNSET_FLAG (handler->debug, OSPF6_LSA_DEBUG);
 
   if (handler->debug == 0 &&
-      handler->name == "Unknown" && type != OSPF6_LSTYPE_UNKNOWN)
+      !strcmp(handler->name, "Unknown") && type != OSPF6_LSTYPE_UNKNOWN)
     {
       free (handler);
       vector_slot (ospf6_lsa_handler_vector, i) = NULL;

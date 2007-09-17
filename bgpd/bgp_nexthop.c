@@ -196,15 +196,15 @@ bgp_nexthop_check_ebgp (afi_t afi, struct attr *attr)
 #ifdef HAVE_IPV6
   else if (afi == AFI_IP6)
     {
-      if (attr->mp_nexthop_len == 32)
+      if (attr->extra->mp_nexthop_len == 32)
 	return 1;
-      else if (attr->mp_nexthop_len == 16)
+      else if (attr->extra->mp_nexthop_len == 16)
 	{
-	  if (IN6_IS_ADDR_LINKLOCAL (&attr->mp_nexthop_global))
+	  if (IN6_IS_ADDR_LINKLOCAL (&attr->extra->mp_nexthop_global))
 	    return 1;
 
 	  rn = bgp_node_match_ipv6 (bgp_connected_table[AFI_IP6],
-				      &attr->mp_nexthop_global);
+				      &attr->extra->mp_nexthop_global);
 	  if (rn)
 	    {
 	      bgp_unlock_node (rn);
@@ -230,21 +230,22 @@ bgp_nexthop_lookup_ipv6 (struct peer *peer, struct bgp_info *ri, int *changed,
   /* If lookup is not enabled, return valid. */
   if (zlookup->sock < 0)
     {
-      ri->igpmetric = 0;
+      if (ri->extra)
+        ri->extra->igpmetric = 0;
       return 1;
     }
 
   /* Only check IPv6 global address only nexthop. */
   attr = ri->attr;
 
-  if (attr->mp_nexthop_len != 16 
-      || IN6_IS_ADDR_LINKLOCAL (&attr->mp_nexthop_global))
+  if (attr->extra->mp_nexthop_len != 16 
+      || IN6_IS_ADDR_LINKLOCAL (&attr->extra->mp_nexthop_global))
     return 1;
 
   memset (&p, 0, sizeof (struct prefix));
   p.family = AF_INET6;
   p.prefixlen = IPV6_MAX_BITLEN;
-  p.u.prefix6 = attr->mp_nexthop_global;
+  p.u.prefix6 = attr->extra->mp_nexthop_global;
 
   /* IBGP or ebgp-multihop */
   rn = bgp_node_get (bgp_nexthop_cache_table[AFI_IP6], &p);
@@ -256,7 +257,7 @@ bgp_nexthop_lookup_ipv6 (struct peer *peer, struct bgp_info *ri, int *changed,
     }
   else
     {
-      bnc = zlookup_query_ipv6 (&attr->mp_nexthop_global);
+      bnc = zlookup_query_ipv6 (&attr->extra->mp_nexthop_global);
       if (bnc)
 	{
 	  struct bgp_table *old;
@@ -296,10 +297,10 @@ bgp_nexthop_lookup_ipv6 (struct peer *peer, struct bgp_info *ri, int *changed,
   if (metricchanged)
     *metricchanged = bnc->metricchanged;
 
-  if (bnc->valid)
-    ri->igpmetric = bnc->metric;
-  else
-    ri->igpmetric = 0;
+  if (bnc->valid && bnc->metric)
+    (bgp_info_extra_get (ri))->igpmetric = bnc->metric;
+  else if (ri->extra)
+    ri->extra->igpmetric = 0;
 
   return bnc->valid;
 }
@@ -318,7 +319,8 @@ bgp_nexthop_lookup (afi_t afi, struct peer *peer, struct bgp_info *ri,
   /* If lookup is not enabled, return valid. */
   if (zlookup->sock < 0)
     {
-      ri->igpmetric = 0;
+      if (ri->extra)
+        ri->extra->igpmetric = 0;
       return 1;
     }
 
@@ -384,10 +386,10 @@ bgp_nexthop_lookup (afi_t afi, struct peer *peer, struct bgp_info *ri,
   if (metricchanged)
     *metricchanged = bnc->metricchanged;
 
-  if (bnc->valid)
-    ri->igpmetric = bnc->metric;
-  else
-    ri->igpmetric = 0;
+  if (bnc->valid && bnc->metric)
+    (bgp_info_extra_get(ri))->igpmetric = bnc->metric;
+  else if (ri->extra)
+    ri->extra->igpmetric = 0;
 
   return bnc->valid;
 }
@@ -478,11 +480,11 @@ bgp_scan (afi_t afi, safi_t safi)
 		    {
 		      bgp_aggregate_decrement (bgp, &rn->p, bi,
 					       afi, SAFI_UNICAST);
-		      UNSET_FLAG (bi->flags, BGP_INFO_VALID);
+		      bgp_info_unset_flag (rn, bi, BGP_INFO_VALID);
 		    }
 		  else
 		    {
-		      SET_FLAG (bi->flags, BGP_INFO_VALID);
+		      bgp_info_set_flag (rn, bi, BGP_INFO_VALID);
 		      bgp_aggregate_increment (bgp, &rn->p, bi,
 					       afi, SAFI_UNICAST);
 		    }
@@ -490,7 +492,7 @@ bgp_scan (afi_t afi, safi_t safi)
 
               if (CHECK_FLAG (bgp->af_flags[afi][SAFI_UNICAST],
 		  BGP_CONFIG_DAMPENING)
-                  &&  bi->damp_info )
+                  &&  bi->extra && bi->extra->damp_info )
                 if (bgp_damp_scan (bi, afi, SAFI_UNICAST))
 		  bgp_aggregate_increment (bgp, &rn->p, bi,
 					   afi, SAFI_UNICAST);
@@ -543,7 +545,6 @@ bgp_connected_add (struct connected *ifc)
 {
   struct prefix p;
   struct prefix *addr;
-  struct prefix *dest;
   struct interface *ifp;
   struct bgp_node *rn;
   struct bgp_connected_ref *bc;
@@ -557,19 +558,10 @@ bgp_connected_add (struct connected *ifc)
     return;
 
   addr = ifc->address;
-  dest = ifc->destination;
 
   if (addr->family == AF_INET)
     {
-      memset (&p, 0, sizeof (struct prefix));
-      p.family = AF_INET;
-      p.prefixlen = addr->prefixlen;
-
-      if (CONNECTED_POINTOPOINT_HOST(ifc))
-	p.u.prefix4 = dest->u.prefix4;
-      else
-	p.u.prefix4 = addr->u.prefix4;
-
+      PREFIX_COPY_IPV4(&p, CONNECTED_PREFIX(ifc));
       apply_mask_ipv4 ((struct prefix_ipv4 *) &p);
 
       if (prefix_ipv4_any ((struct prefix_ipv4 *) &p))
@@ -590,17 +582,9 @@ bgp_connected_add (struct connected *ifc)
 	}
     }
 #ifdef HAVE_IPV6
-  if (addr->family == AF_INET6)
+  else if (addr->family == AF_INET6)
     {
-      memset (&p, 0, sizeof (struct prefix));
-      p.family = AF_INET6;
-      p.prefixlen = addr->prefixlen;
-
-      if (if_is_pointopoint (ifp) && dest)
-	p.u.prefix6 = dest->u.prefix6;
-      else
-	p.u.prefix6 = addr->u.prefix6;
-
+      PREFIX_COPY_IPV6(&p, CONNECTED_PREFIX(ifc));
       apply_mask_ipv6 ((struct prefix_ipv6 *) &p);
 
       if (IN6_IS_ADDR_UNSPECIFIED (&p.u.prefix6))
@@ -631,7 +615,6 @@ bgp_connected_delete (struct connected *ifc)
 {
   struct prefix p;
   struct prefix *addr;
-  struct prefix *dest;
   struct interface *ifp;
   struct bgp_node *rn;
   struct bgp_connected_ref *bc;
@@ -642,19 +625,10 @@ bgp_connected_delete (struct connected *ifc)
     return;
 
   addr = ifc->address;
-  dest = ifc->destination;
 
   if (addr->family == AF_INET)
     {
-      memset (&p, 0, sizeof (struct prefix));
-      p.family = AF_INET;
-      p.prefixlen = addr->prefixlen;
-
-      if (CONNECTED_POINTOPOINT_HOST(ifc))
-	p.u.prefix4 = dest->u.prefix4;
-      else
-	p.u.prefix4 = addr->u.prefix4;
-
+      PREFIX_COPY_IPV4(&p, CONNECTED_PREFIX(ifc));
       apply_mask_ipv4 ((struct prefix_ipv4 *) &p);
 
       if (prefix_ipv4_any ((struct prefix_ipv4 *) &p))
@@ -677,15 +651,7 @@ bgp_connected_delete (struct connected *ifc)
 #ifdef HAVE_IPV6
   else if (addr->family == AF_INET6)
     {
-      memset (&p, 0, sizeof (struct prefix));
-      p.family = AF_INET6;
-      p.prefixlen = addr->prefixlen;
-
-      if (if_is_pointopoint (ifp) && dest)
-	p.u.prefix6 = dest->u.prefix6;
-      else
-	p.u.prefix6 = addr->u.prefix6;
-
+      PREFIX_COPY_IPV6(&p, CONNECTED_PREFIX(ifc));
       apply_mask_ipv6 ((struct prefix_ipv6 *) &p);
 
       if (IN6_IS_ADDR_UNSPECIFIED (&p.u.prefix6))

@@ -36,6 +36,35 @@ setsockopt_so_recvbuf (int sock, int size)
   return ret;
 }
 
+int
+setsockopt_so_sendbuf (const int sock, int size)
+{
+  int ret = setsockopt (sock, SOL_SOCKET, SO_SNDBUF,
+    (char *)&size, sizeof (int));
+  
+  if (ret < 0)
+    zlog_err ("fd %d: can't setsockopt SO_SNDBUF to %d: %s",
+      sock, size, safe_strerror (errno));
+
+  return ret;
+}
+
+int
+getsockopt_so_sendbuf (const int sock)
+{
+  u_int32_t optval;
+  socklen_t optlen = sizeof (optval);
+  int ret = getsockopt (sock, SOL_SOCKET, SO_SNDBUF,
+    (char *)&optval, &optlen);
+  if (ret < 0)
+  {
+    zlog_err ("fd %d: can't getsockopt SO_SNDBUF: %d (%s)",
+      sock, errno, safe_strerror (errno));
+    return ret;
+  }
+  return optval;
+}
+
 static void *
 getsockopt_cmsg_data (struct msghdr *msgh, int level, int type)
 {
@@ -176,9 +205,10 @@ getsockopt_ipv6_ifindex (struct msghdr *msgh)
 int
 setsockopt_multicast_ipv4(int sock, 
 			int optname, 
-			struct in_addr if_addr,
+			struct in_addr if_addr /* required */,
 			unsigned int mcast_addr,
-			unsigned int ifindex)
+			unsigned int ifindex /* optional: if non-zero, may be
+						  used instead of if_addr */)
 {
 
 #ifdef HAVE_STRUCT_IP_MREQN_IMR_IFINDEX

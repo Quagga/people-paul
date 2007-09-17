@@ -26,6 +26,10 @@
 #include <netinet/if_ether.h>
 #endif
 
+#ifndef ETHER_ADDR_LEN
+#define	ETHER_ADDR_LEN	ETHERADDRL
+#endif
+
 #include "log.h"
 #include "memory.h"
 #include "if.h"
@@ -56,6 +60,14 @@
 
 extern struct thread_master *master;
 extern struct isis *isis;
+
+/*
+ * Prototypes.
+ */
+void isis_circuit_down(struct isis_circuit *);
+int isis_interface_config_write(struct vty *);
+int isis_if_new_hook(struct interface *);
+int isis_if_delete_hook(struct interface *);
 
 struct isis_circuit *
 isis_circuit_new ()
@@ -275,10 +287,10 @@ isis_circuit_del_addr (struct isis_circuit *circuit,
 {
   struct prefix_ipv4 *ipv4, *ip = NULL;
   struct listnode *node;
-  int found = 0;
   u_char buf[BUFSIZ];
 #ifdef HAVE_IPV6
   struct prefix_ipv6 *ipv6, *ip6 = NULL;
+  int found = 0;
 #endif /* HAVE_IPV6 */
 
   memset (&buf, 0, BUFSIZ);
@@ -372,12 +384,14 @@ isis_circuit_if_add (struct isis_circuit *circuit, struct interface *ifp)
       /*
        * Get the Hardware Address
        */
-#ifdef HAVE_SOCKADDR_DL
+#ifdef HAVE_STRUCT_SOCKADDR_DL
+#ifndef SUNOS_5
       if (circuit->interface->sdl.sdl_alen != ETHER_ADDR_LEN)
 	zlog_warn ("unsupported link layer");
       else
 	memcpy (circuit->u.bc.snpa, LLADDR (&circuit->interface->sdl),
 		ETH_ALEN);
+#endif
 #else
       if (circuit->interface->hw_addr_len != ETH_ALEN)
 	{
@@ -393,7 +407,7 @@ isis_circuit_if_add (struct isis_circuit *circuit, struct interface *ifp)
 		 snpa_print (circuit->u.bc.snpa));
 
 #endif /* EXTREME_DEBUG */
-#endif /* HAVE_SOCKADDR_DL */
+#endif /* HAVE_STRUCT_SOCKADDR_DL */
     }
   else if (if_is_pointopoint (ifp))
     {
@@ -438,11 +452,13 @@ isis_circuit_update_params (struct isis_circuit *circuit,
   /*
    * Get the Hardware Address
    */
-#ifdef HAVE_SOCKADDR_DL
+#ifdef HAVE_STRUCT_SOCKADDR_DL
+#ifndef SUNOS_5
   if (circuit->interface->sdl.sdl_alen != ETHER_ADDR_LEN)
     zlog_warn ("unsupported link layer");
   else
     memcpy (circuit->u.bc.snpa, LLADDR (&circuit->interface->sdl), ETH_ALEN);
+#endif
 #else
   if (circuit->interface->hw_addr_len != ETH_ALEN)
     {
@@ -944,7 +960,7 @@ DEFUN (isis_circuit_type,
 
   assert (circuit);
 
-  circuit_t = string2circuit_t ((u_char *)argv[0]);
+  circuit_t = string2circuit_t (argv[0]);
 
   if (!circuit_t)
     {

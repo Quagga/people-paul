@@ -25,10 +25,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "config.h"
 #endif /* HAVE_CONFIG_H */
 
-#ifdef GNU_LINUX
-#define _GNU_SOURCE
-#endif /* GNU_LINUX */
-
 #ifdef SUNOS_5
 #define _XPG4_2
 #define __EXTENSIONS__
@@ -63,6 +59,9 @@ typedef int socklen_t;
 #include <sys/types.h>
 #include <sys/param.h>
 #ifdef HAVE_SYS_SYSCTL_H
+#ifdef GNU_LINUX
+#include <linux/types.h>
+#endif
 #include <sys/sysctl.h>
 #endif /* HAVE_SYS_SYSCTL_H */
 #include <sys/ioctl.h>
@@ -312,7 +311,7 @@ typedef int socklen_t;
 
 /*  The definition of struct in_pktinfo is missing in old version of
     GLIBC 2.1 (Redhat 6.1).  */
-#if defined (GNU_LINUX) && ! defined (HAVE_INPKTINFO)
+#if defined (GNU_LINUX) && ! defined (HAVE_STRUCT_IN_PKTINFO)
 struct in_pktinfo
 {
   int ipi_ifindex;
@@ -444,6 +443,9 @@ extern const char *zebra_route_string(unsigned int route_type);
 extern char zebra_route_char(unsigned int route_type);
 /* Map a zserv command type to the same string, 
  * e.g. ZEBRA_INTERFACE_ADD -> "ZEBRA_INTERFACE_ADD" */
+/* Map a protocol name to its number. e.g. ZEBRA_ROUTE_BGP->9*/
+extern int proto_name2num(const char *s);
+
 extern const char *zserv_command_string (unsigned int command);
 
 /* Zebra's family types. */
@@ -452,10 +454,12 @@ extern const char *zserv_command_string (unsigned int command);
 #define ZEBRA_FAMILY_MAX                 3
 
 /* Error codes of zebra. */
+#define ZEBRA_ERR_NOERROR                0
 #define ZEBRA_ERR_RTEXIST               -1
 #define ZEBRA_ERR_RTUNREACH             -2
 #define ZEBRA_ERR_EPERM                 -3
 #define ZEBRA_ERR_RTNOEXIST             -4
+#define ZEBRA_ERR_KERNEL                -5
 
 /* Zebra message flags */
 #define ZEBRA_FLAG_INTERNAL           0x01

@@ -32,6 +32,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #define BGP_MED_MAX UINT32_MAX
 
+
 /* BGP Attribute type range. */
 #define BGP_ATTR_TYPE_RANGE     256
 #define BGP_ATTR_BITMAP_SIZE    (BGP_ATTR_TYPE_RANGE / BITMAP_NBBY)
@@ -44,21 +45,19 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 /* BGP attribute header must bigger than 2. */
 #define BGP_ATTR_MIN_LEN        2       /* Attribute flag and type. */
+#define BGP_ATTR_DEFAULT_WEIGHT 32768
 
-/* BGP attribute structure. */
-struct attr
+/* Additional/uncommon BGP attributes.
+ * lazily allocated as and when a struct attr
+ * requires it.
+ */
+struct attr_extra
 {
-  /* Attributes. */
+  /* Multi-Protocol Nexthop, AFI IPv6 */
 #ifdef HAVE_IPV6
   struct in6_addr mp_nexthop_global;
   struct in6_addr mp_nexthop_local;
 #endif /* HAVE_IPV6 */
-
-  /* AS Path structure */
-  struct aspath *aspath;
-
-  /* Community structure */
-  struct community *community;	
 
   /* Extended Communities attribute. */
   struct ecommunity *ecommunity;
@@ -69,6 +68,37 @@ struct attr
   /* Unknown transitive attribute. */
   struct transit *transit;
 
+  struct in_addr mp_nexthop_global_in;
+  struct in_addr mp_nexthop_local_in;
+  
+  /* Aggregator Router ID attribute */
+  struct in_addr aggregator_addr;
+  
+  /* Route Reflector Originator attribute */
+  struct in_addr originator_id;
+  
+  /* Local weight, not actually an attribute */
+  u_int32_t weight;
+  
+  /* Aggregator ASN */
+  as_t aggregator_as;
+  
+  /* MP Nexthop length */
+  u_char mp_nexthop_len;
+};
+
+/* BGP core attribute structure. */
+struct attr
+{
+  /* AS Path structure */
+  struct aspath *aspath;
+
+  /* Community structure */
+  struct community *community;	
+  
+  /* Lazily allocated pointer to extra attributes */
+  struct attr_extra *extra;
+  
   /* Reference count of this attribute. */
   unsigned long refcnt;
 
@@ -79,14 +109,15 @@ struct attr
   struct in_addr nexthop;
   u_int32_t med;
   u_int32_t local_pref;
-  struct in_addr aggregator_addr;
-  struct in_addr originator_id;
-  struct in_addr mp_nexthop_global_in;
-  struct in_addr mp_nexthop_local_in;
-  u_int32_t weight;
-  as_t aggregator_as;
+  
+  /* AS-Pathlimit */
+  struct {
+    u_int32_t as;
+    u_char ttl;
+  } pathlimit;
+  
+  /* Path origin attribute */
   u_char origin;
-  u_char mp_nexthop_len;
 };
 
 /* Router Reflector related structure. */
@@ -112,6 +143,9 @@ extern void bgp_attr_init (void);
 extern int bgp_attr_parse (struct peer *, struct attr *, bgp_size_t,
 		    struct bgp_nlri *, struct bgp_nlri *);
 extern int bgp_attr_check (struct peer *, struct attr *);
+extern struct attr_extra *bgp_attr_extra_get (struct attr *);
+extern void bgp_attr_extra_free (struct attr *);
+extern void bgp_attr_dup (struct attr *, struct attr *);
 extern struct attr *bgp_attr_intern (struct attr *attr);
 extern void bgp_attr_unintern (struct attr *);
 extern void bgp_attr_flush (struct attr *);
@@ -129,8 +163,8 @@ extern bgp_size_t bgp_packet_withdraw (struct peer *peer, struct stream *s,
                                 struct prefix_rd *, u_char *);
 extern void bgp_dump_routes_attr (struct stream *, struct attr *,
 				  struct prefix *);
-extern unsigned int attrhash_key_make (struct attr *);
-extern int attrhash_cmp (struct attr *, struct attr *);
+extern int attrhash_cmp (void *, void *);
+extern unsigned int attrhash_key_make (void *);
 extern void attr_show_all (struct vty *);
 extern unsigned long int attr_count (void);
 extern unsigned long int attr_unknown_count (void);

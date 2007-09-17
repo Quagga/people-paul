@@ -23,6 +23,8 @@
 #define _ZEBRA_SOCKOPT_H
 
 extern int setsockopt_so_recvbuf (int sock, int size);
+extern int setsockopt_so_sendbuf (const int sock, int size);
+extern int getsockopt_so_sendbuf (const int sock);
 
 #ifdef HAVE_IPV6
 extern int setsockopt_ipv6_pktinfo (int, int);
@@ -79,9 +81,12 @@ extern int setsockopt_ipv6_multicast_loop (int, int);
                     ? SOPT_SIZE_CMSG_PKTINFO_IPV6())
 
 extern int setsockopt_multicast_ipv4(int sock, int optname, 
-			             struct in_addr if_addr,
+			             struct in_addr if_addr
+					 /* required: interface to join on */,
                                      unsigned int mcast_addr,
-			             unsigned int ifindex);
+			             unsigned int ifindex
+					 /* optional: if non-zero, may be used
+					 	instead of if_addr */);
 
 /* Ask for, and get, ifindex, by whatever method is supported. */
 extern int setsockopt_ifindex (int, int, int);

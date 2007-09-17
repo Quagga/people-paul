@@ -28,8 +28,20 @@
 #define DISTANCE_INFINITY  255
 
 /* Routing information base. */
+
+union g_addr {
+  struct in_addr ipv4;
+#ifdef HAVE_IPV6
+  struct in6_addr ipv6;
+#endif /* HAVE_IPV6 */
+};
+
 struct rib
 {
+  /* Status Flags for the *route_node*, but kept in the head RIB.. */
+  u_char rn_status;
+#define RIB_ROUTE_QUEUED	(1 << 0)
+
   /* Link list. */
   struct rib *next;
   struct rib *prev;
@@ -43,9 +55,6 @@ struct rib
   /* Uptime. */
   time_t uptime;
 
-  /* ref count */
-  unsigned int lock;
-
   /* Type fo this route. */
   int type;
 
@@ -58,9 +67,15 @@ struct rib
   /* Distance. */
   u_char distance;
 
-  /* Flags of this route.  This flag's definition is in lib/zebra.h
-     ZEBRA_FLAG_* */
+  /* Flags of this route.
+   * This flag's definition is in lib/zebra.h ZEBRA_FLAG_* and is exposed
+   * to clients via Zserv
+   */
   u_char flags;
+
+  /* RIB internal status */
+  u_char status;
+#define RIB_ENTRY_REMOVED	(1 << 0)
 
   /* Nexthop information. */
   u_char nexthop_num;
@@ -160,24 +175,13 @@ struct nexthop
 #define NEXTHOP_FLAG_RECURSIVE  (1 << 2) /* Recursive nexthop. */
 
   /* Nexthop address or interface name. */
-  union
-  {
-    struct in_addr ipv4;
-#ifdef HAVE_IPV6
-    struct in6_addr ipv6;
-#endif /* HAVE_IPV6*/
-  } gate;
+  union g_addr gate;
 
   /* Recursive lookup nexthop. */
   u_char rtype;
   unsigned int rifindex;
-  union
-  {
-    struct in_addr ipv4;
-#ifdef HAVE_IPV6
-    struct in6_addr ipv6;
-#endif /* HAVE_IPV6 */
-  } rgate;
+  union g_addr rgate;
+  union g_addr src;
 };
 
 /* Routing table instance.  */
@@ -205,7 +209,17 @@ struct vrf
 extern struct nexthop *nexthop_ifindex_add (struct rib *, unsigned int);
 extern struct nexthop *nexthop_ifname_add (struct rib *, char *);
 extern struct nexthop *nexthop_blackhole_add (struct rib *);
-extern struct nexthop *nexthop_ipv4_add (struct rib *, struct in_addr *);
+extern struct nexthop *nexthop_ipv4_add (struct rib *, struct in_addr *,
+					 struct in_addr *);
+extern void rib_lookup_and_dump (struct prefix_ipv4 *);
+extern void rib_dump (const char *, const struct prefix_ipv4 *, const struct rib *);
+extern int rib_lookup_ipv4_route (struct prefix_ipv4 *, union sockunion *);
+#define ZEBRA_RIB_LOOKUP_ERROR -1
+#define ZEBRA_RIB_FOUND_EXACT 0
+#define ZEBRA_RIB_FOUND_NOGATE 1
+#define ZEBRA_RIB_FOUND_CONNECTED 2
+#define ZEBRA_RIB_NOTFOUND 3
+
 #ifdef HAVE_IPV6
 extern struct nexthop *nexthop_ipv6_add (struct rib *, struct in6_addr *);
 #endif /* HAVE_IPV6 */
@@ -218,8 +232,9 @@ extern struct route_table *vrf_static_table (afi_t afi, safi_t safi, u_int32_t i
  * All rib_add_ipv[46]* functions will not just add prefix into RIB, but
  * also implicitly withdraw equal prefix of same type. */
 extern int rib_add_ipv4 (int type, int flags, struct prefix_ipv4 *p, 
-			 struct in_addr *gate, unsigned int ifindex, 
-			 u_int32_t vrf_id, u_int32_t, u_char);
+			 struct in_addr *gate, struct in_addr *src,
+			 unsigned int ifindex, u_int32_t vrf_id,
+			 u_int32_t, u_char);
 
 extern int rib_add_ipv4_multipath (struct prefix_ipv4 *, struct rib *);
 
