@@ -47,8 +47,6 @@ struct work_queue_item
   unsigned short ran;			/* # of times item has been run */
 };
 
-#define WQ_UNPLUGGED	(1 << 0) /* available for draining */
-
 struct work_queue
 {
   /* Everything but the specification struct is private
@@ -98,6 +96,7 @@ struct work_queue
   
   /* private state */
   u_int16_t flags;		/* user set flag */
+#define WQ_UNPLUGGED	(1 << 0) /* available for draining */
 };
 
 /* User API */
