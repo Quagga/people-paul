@@ -81,6 +81,7 @@ bgp_option_set (int flag)
     case BGP_OPT_NO_FIB:
     case BGP_OPT_MULTIPLE_INSTANCE:
     case BGP_OPT_CONFIG_CISCO:
+    case BGP_OPT_CONFIG_AFI:
       SET_FLAG (bm->options, flag);
       break;
     default:
@@ -100,6 +101,7 @@ bgp_option_unset (int flag)
       /* Fall through.  */
     case BGP_OPT_NO_FIB:
     case BGP_OPT_CONFIG_CISCO:
+    case BGP_OPT_CONFIG_AFI:
       UNSET_FLAG (bm->options, flag);
       break;
     default:
@@ -1724,7 +1726,9 @@ peer_group_bind (struct bgp *bgp, union sockunion *su,
   int first_member = 0;
 
   /* Check peer group's address family.  */
-  if (! group->conf->afc[afi][safi])
+  if (! group->conf->afc[afi][safi]
+      && !(bgp_flag_check (bgp, BGP_FLAG_NO_DEFAULT_IPV4)
+           && afi == AFI_IP && safi == SAFI_UNICAST))
     return BGP_ERR_PEER_GROUP_AF_UNCONFIGURED;
 
   /* Lookup the peer.  */
@@ -4485,14 +4489,167 @@ bgp_config_write_filter (struct vty *vty, struct peer *peer,
 	     filter->aslist[out].name, VTY_NEWLINE);
 }
 
+/* Write out the general peer configuration */
+static void
+bgp_config_write_peer_global (struct vty *vty, struct bgp *bgp,
+                              struct peer *peer)
+{
+  struct peer *g_peer = NULL;
+  char buf[SU_ADDRSTRLEN];
+  char *addr;
+
+  addr = peer->host;
+  if (peer_group_active (peer))
+    g_peer = peer->group->conf;
+
+  /* remote-as. */
+  if (! peer_group_active (peer))
+    {
+      if (CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
+        vty_out (vty, " neighbor %s peer-group%s", addr,
+                 VTY_NEWLINE);
+      if (peer->as)
+        vty_out (vty, " neighbor %s remote-as %d%s", addr, peer->as,
+                 VTY_NEWLINE);
+    }
+  else
+    {
+      if (! g_peer->as)
+        vty_out (vty, " neighbor %s remote-as %d%s", addr, peer->as,
+                 VTY_NEWLINE);
+      if (peer->af_group[AFI_IP][SAFI_UNICAST])
+        vty_out (vty, " neighbor %s peer-group %s%s", addr,
+                 peer->group->name, VTY_NEWLINE);
+    }
+
+  /* local-as. */
+  if (peer->change_local_as)
+    if (! peer_group_active (peer))
+      vty_out (vty, " neighbor %s local-as %d%s%s", addr,
+               peer->change_local_as,
+               CHECK_FLAG (peer->flags, PEER_FLAG_LOCAL_AS_NO_PREPEND) ?
+               " no-prepend" : "", VTY_NEWLINE);
+
+  /* Description. */
+  if (peer->desc)
+    vty_out (vty, " neighbor %s description %s%s", addr, peer->desc,
+             VTY_NEWLINE);
+
+  /* Shutdown. */
+  if (CHECK_FLAG (peer->flags, PEER_FLAG_SHUTDOWN))
+    if (! peer_group_active (peer) ||
+        ! CHECK_FLAG (g_peer->flags, PEER_FLAG_SHUTDOWN))
+      vty_out (vty, " neighbor %s shutdown%s", addr, VTY_NEWLINE);
+
+  /* Password. */
+  if (peer->password)
+    if (!peer_group_active (peer)
+        || ! g_peer->password
+        || strcmp (peer->password, g_peer->password) != 0)
+      vty_out (vty, " neighbor %s password %s%s", addr, peer->password,
+               VTY_NEWLINE);
+
+  /* BGP port. */
+  if (peer->port != BGP_PORT_DEFAULT)
+    vty_out (vty, " neighbor %s port %d%s", addr, peer->port,
+             VTY_NEWLINE);
+
+  /* Local interface name. */
+  if (peer->ifname)
+    vty_out (vty, " neighbor %s interface %s%s", addr, peer->ifname,
+             VTY_NEWLINE);
+
+  /* Passive. */
+  if (CHECK_FLAG (peer->flags, PEER_FLAG_PASSIVE))
+    if (! peer_group_active (peer) ||
+        ! CHECK_FLAG (g_peer->flags, PEER_FLAG_PASSIVE))
+      vty_out (vty, " neighbor %s passive%s", addr, VTY_NEWLINE);
+
+  /* EBGP multihop.  */
+  if (peer_sort (peer) != BGP_PEER_IBGP && peer->ttl != 1)
+    if (! peer_group_active (peer) ||
+        g_peer->ttl != peer->ttl)
+      vty_out (vty, " neighbor %s ebgp-multihop %d%s", addr, peer->ttl,
+               VTY_NEWLINE);
+
+  /* disable-connected-check.  */
+  if (CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
+    if (! peer_group_active (peer) ||
+        ! CHECK_FLAG (g_peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
+      vty_out (vty, " neighbor %s disable-connected-check%s", addr, VTY_NEWLINE);
+
+  /* Update-source. */
+  if (peer->update_if)
+    if (! peer_group_active (peer) || ! g_peer->update_if
+        || strcmp (g_peer->update_if, peer->update_if) != 0)
+      vty_out (vty, " neighbor %s update-source %s%s", addr,
+               peer->update_if, VTY_NEWLINE);
+  if (peer->update_source)
+    if (! peer_group_active (peer) || ! g_peer->update_source
+        || sockunion_cmp (g_peer->update_source,
+                          peer->update_source) != 0)
+      vty_out (vty, " neighbor %s update-source %s%s", addr,
+               sockunion2str (peer->update_source, buf, SU_ADDRSTRLEN),
+               VTY_NEWLINE);
+
+  /* advertisement-interval */
+  if (CHECK_FLAG (peer->config, PEER_CONFIG_ROUTEADV))
+    vty_out (vty, " neighbor %s advertisement-interval %d%s",
+             addr, peer->v_routeadv, VTY_NEWLINE); 
+
+  /* timers. */
+  if (CHECK_FLAG (peer->config, PEER_CONFIG_TIMER)
+      && ! peer_group_active (peer))
+      vty_out (vty, " neighbor %s timers %d %d%s", addr, 
+      peer->keepalive, peer->holdtime, VTY_NEWLINE);
+
+  if (CHECK_FLAG (peer->config, PEER_CONFIG_CONNECT))
+      vty_out (vty, " neighbor %s timers connect %d%s", addr, 
+      peer->connect, VTY_NEWLINE);
+
+  /* Default weight. */
+  if (CHECK_FLAG (peer->config, PEER_CONFIG_WEIGHT))
+    if (! peer_group_active (peer) ||
+        g_peer->weight != peer->weight)
+      vty_out (vty, " neighbor %s weight %d%s", addr, peer->weight,
+               VTY_NEWLINE);
+
+  /* Dynamic capability.  */
+  if (CHECK_FLAG (peer->flags, PEER_FLAG_DYNAMIC_CAPABILITY))
+    if (! peer_group_active (peer) ||
+        ! CHECK_FLAG (g_peer->flags, PEER_FLAG_DYNAMIC_CAPABILITY))
+    vty_out (vty, " neighbor %s capability dynamic%s", addr,
+         VTY_NEWLINE);
+
+  /* dont capability negotiation. */
+  if (CHECK_FLAG (peer->flags, PEER_FLAG_DONT_CAPABILITY))
+    if (! peer_group_active (peer) ||
+        ! CHECK_FLAG (g_peer->flags, PEER_FLAG_DONT_CAPABILITY))
+    vty_out (vty, " neighbor %s dont-capability-negotiate%s", addr,
+             VTY_NEWLINE);
+
+  /* override capability negotiation. */
+  if (CHECK_FLAG (peer->flags, PEER_FLAG_OVERRIDE_CAPABILITY))
+    if (! peer_group_active (peer) ||
+        ! CHECK_FLAG (g_peer->flags, PEER_FLAG_OVERRIDE_CAPABILITY))
+    vty_out (vty, " neighbor %s override-capability%s", addr,
+             VTY_NEWLINE);
+
+  /* strict capability negotiation. */
+  if (CHECK_FLAG (peer->flags, PEER_FLAG_STRICT_CAP_MATCH))
+    if (! peer_group_active (peer) ||
+        ! CHECK_FLAG (g_peer->flags, PEER_FLAG_STRICT_CAP_MATCH))
+    vty_out (vty, " neighbor %s strict-capability-match%s", addr,
+         VTY_NEWLINE);
+}
+
 /* BGP peer configuration display function. */
 static void
-bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
-		       struct peer *peer, afi_t afi, safi_t safi)
+bgp_config_write_peer_af (struct vty *vty, struct bgp *bgp,
+		          struct peer *peer, afi_t afi, safi_t safi)
 {
   struct bgp_filter *filter;
   struct peer *g_peer = NULL;
-  char buf[SU_ADDRSTRLEN];
   char *addr;
 
   filter = &peer->filter[afi][safi];
@@ -4500,172 +4657,24 @@ bgp_config_write_peer (struct vty *vty, struct bgp *bgp,
   if (peer_group_active (peer))
     g_peer = peer->group->conf;
 
-  /************************************
-   ****** Global to the neighbor ******
-   ************************************/
-  if (afi == AFI_IP && safi == SAFI_UNICAST)
+  if (!bgp_option_check (BGP_OPT_CONFIG_AFI)
+      && (afi == AFI_IP && safi == SAFI_UNICAST)
+      && ! peer_group_active (peer))
     {
-      /* remote-as. */
-      if (! peer_group_active (peer))
-	{
-	  if (CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
-	    vty_out (vty, " neighbor %s peer-group%s", addr,
-		     VTY_NEWLINE);
-	  if (peer->as)
-	    vty_out (vty, " neighbor %s remote-as %d%s", addr, peer->as,
-		     VTY_NEWLINE);
-	}
+      if (bgp_flag_check (bgp, BGP_FLAG_NO_DEFAULT_IPV4))
+        {
+          if (peer->afc[AFI_IP][SAFI_UNICAST])
+            vty_out (vty, " neighbor %s activate%s", addr, VTY_NEWLINE);
+        }
       else
-	{
-	  if (! g_peer->as)
-	    vty_out (vty, " neighbor %s remote-as %d%s", addr, peer->as,
-		     VTY_NEWLINE);
-	  if (peer->af_group[AFI_IP][SAFI_UNICAST])
-	    vty_out (vty, " neighbor %s peer-group %s%s", addr,
-		     peer->group->name, VTY_NEWLINE);
-	}
-
-      /* local-as. */
-      if (peer->change_local_as)
-	if (! peer_group_active (peer))
-	  vty_out (vty, " neighbor %s local-as %d%s%s", addr,
-		   peer->change_local_as,
-		   CHECK_FLAG (peer->flags, PEER_FLAG_LOCAL_AS_NO_PREPEND) ?
-		   " no-prepend" : "", VTY_NEWLINE);
-
-      /* Description. */
-      if (peer->desc)
-	vty_out (vty, " neighbor %s description %s%s", addr, peer->desc,
-		 VTY_NEWLINE);
-
-      /* Shutdown. */
-      if (CHECK_FLAG (peer->flags, PEER_FLAG_SHUTDOWN))
-        if (! peer_group_active (peer) ||
-	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_SHUTDOWN))
-	  vty_out (vty, " neighbor %s shutdown%s", addr, VTY_NEWLINE);
-
-      /* Password. */
-      if (peer->password)
-	if (!peer_group_active (peer)
-	    || ! g_peer->password
-	    || strcmp (peer->password, g_peer->password) != 0)
-	  vty_out (vty, " neighbor %s password %s%s", addr, peer->password,
-		   VTY_NEWLINE);
-
-      /* BGP port. */
-      if (peer->port != BGP_PORT_DEFAULT)
-	vty_out (vty, " neighbor %s port %d%s", addr, peer->port,
-		 VTY_NEWLINE);
-
-      /* Local interface name. */
-      if (peer->ifname)
-	vty_out (vty, " neighbor %s interface %s%s", addr, peer->ifname,
-		 VTY_NEWLINE);
-  
-      /* Passive. */
-      if (CHECK_FLAG (peer->flags, PEER_FLAG_PASSIVE))
-        if (! peer_group_active (peer) ||
-	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_PASSIVE))
-	  vty_out (vty, " neighbor %s passive%s", addr, VTY_NEWLINE);
-
-      /* EBGP multihop.  */
-      if (peer_sort (peer) != BGP_PEER_IBGP && peer->ttl != 1)
-        if (! peer_group_active (peer) ||
-	    g_peer->ttl != peer->ttl)
-	  vty_out (vty, " neighbor %s ebgp-multihop %d%s", addr, peer->ttl,
-		   VTY_NEWLINE);
-
-      /* disable-connected-check.  */
-      if (CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
-	if (! peer_group_active (peer) ||
-	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
-	  vty_out (vty, " neighbor %s disable-connected-check%s", addr, VTY_NEWLINE);
-
-      /* Update-source. */
-      if (peer->update_if)
-	if (! peer_group_active (peer) || ! g_peer->update_if
-	    || strcmp (g_peer->update_if, peer->update_if) != 0)
-	  vty_out (vty, " neighbor %s update-source %s%s", addr,
-		   peer->update_if, VTY_NEWLINE);
-      if (peer->update_source)
-	if (! peer_group_active (peer) || ! g_peer->update_source
-	    || sockunion_cmp (g_peer->update_source,
-			      peer->update_source) != 0)
-	  vty_out (vty, " neighbor %s update-source %s%s", addr,
-		   sockunion2str (peer->update_source, buf, SU_ADDRSTRLEN),
-		   VTY_NEWLINE);
-
-      /* advertisement-interval */
-      if (CHECK_FLAG (peer->config, PEER_CONFIG_ROUTEADV))
-	vty_out (vty, " neighbor %s advertisement-interval %d%s",
-		 addr, peer->v_routeadv, VTY_NEWLINE); 
-
-      /* timers. */
-      if (CHECK_FLAG (peer->config, PEER_CONFIG_TIMER)
-	  && ! peer_group_active (peer))
-	  vty_out (vty, " neighbor %s timers %d %d%s", addr, 
-	  peer->keepalive, peer->holdtime, VTY_NEWLINE);
-
-      if (CHECK_FLAG (peer->config, PEER_CONFIG_CONNECT))
-	  vty_out (vty, " neighbor %s timers connect %d%s", addr, 
-	  peer->connect, VTY_NEWLINE);
-
-      /* Default weight. */
-      if (CHECK_FLAG (peer->config, PEER_CONFIG_WEIGHT))
-        if (! peer_group_active (peer) ||
-	    g_peer->weight != peer->weight)
-	  vty_out (vty, " neighbor %s weight %d%s", addr, peer->weight,
-		   VTY_NEWLINE);
-
-      /* Dynamic capability.  */
-      if (CHECK_FLAG (peer->flags, PEER_FLAG_DYNAMIC_CAPABILITY))
-        if (! peer_group_active (peer) ||
-	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_DYNAMIC_CAPABILITY))
-	vty_out (vty, " neighbor %s capability dynamic%s", addr,
-	     VTY_NEWLINE);
-
-      /* dont capability negotiation. */
-      if (CHECK_FLAG (peer->flags, PEER_FLAG_DONT_CAPABILITY))
-        if (! peer_group_active (peer) ||
-	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_DONT_CAPABILITY))
-	vty_out (vty, " neighbor %s dont-capability-negotiate%s", addr,
-		 VTY_NEWLINE);
-
-      /* override capability negotiation. */
-      if (CHECK_FLAG (peer->flags, PEER_FLAG_OVERRIDE_CAPABILITY))
-        if (! peer_group_active (peer) ||
-	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_OVERRIDE_CAPABILITY))
-	vty_out (vty, " neighbor %s override-capability%s", addr,
-		 VTY_NEWLINE);
-
-      /* strict capability negotiation. */
-      if (CHECK_FLAG (peer->flags, PEER_FLAG_STRICT_CAP_MATCH))
-        if (! peer_group_active (peer) ||
-	    ! CHECK_FLAG (g_peer->flags, PEER_FLAG_STRICT_CAP_MATCH))
-	vty_out (vty, " neighbor %s strict-capability-match%s", addr,
-	     VTY_NEWLINE);
-
-      if (! peer_group_active (peer))
-	{
-	  if (bgp_flag_check (bgp, BGP_FLAG_NO_DEFAULT_IPV4))
-	    {
-	      if (peer->afc[AFI_IP][SAFI_UNICAST])
-		vty_out (vty, " neighbor %s activate%s", addr, VTY_NEWLINE);
-	    }
-          else
-	    {
-	      if (! peer->afc[AFI_IP][SAFI_UNICAST])
-		vty_out (vty, " no neighbor %s activate%s", addr, VTY_NEWLINE);
-	    }
-	}
+        {
+          if (! peer->afc[AFI_IP][SAFI_UNICAST])
+            vty_out (vty, " no neighbor %s activate%s", addr, VTY_NEWLINE);
+        }
     }
-
-
-  /************************************
-   ****** Per AF to the neighbor ******
-   ************************************/
-
-  if (! (afi == AFI_IP && safi == SAFI_UNICAST))
+  
+  if (bgp_option_check (BGP_OPT_CONFIG_AFI)
+      || !(afi == AFI_IP && safi == SAFI_UNICAST))
     {
       if (peer->af_group[afi][safi])
 	vty_out (vty, " neighbor %s peer-group %s%s", addr,
@@ -4822,14 +4831,17 @@ bgp_config_write_family_header (struct vty *vty, afi_t afi, safi_t safi,
   if (*write)
     return;
 
-  if (afi == AFI_IP && safi == SAFI_UNICAST)
+  if (!bgp_option_check (BGP_OPT_CONFIG_AFI)
+      && (afi == AFI_IP && safi == SAFI_UNICAST))
     return;
 
   vty_out (vty, "!%s address-family ", VTY_NEWLINE);
 
   if (afi == AFI_IP)
     {
-      if (safi == SAFI_MULTICAST)
+      if (safi == SAFI_UNICAST)
+        vty_out (vty, "ipv4");
+      else if (safi == SAFI_MULTICAST)
 	vty_out (vty, "ipv4 multicast");
       else if (safi == SAFI_MPLS_VPN)
 	vty_out (vty, "vpnv4 unicast");
@@ -4866,7 +4878,7 @@ bgp_config_write_family (struct vty *vty, struct bgp *bgp, afi_t afi,
       if (group->conf->afc[afi][safi])
 	{
 	  bgp_config_write_family_header (vty, afi, safi, &write);
-	  bgp_config_write_peer (vty, bgp, group->conf, afi, safi);
+	  bgp_config_write_peer_af (vty, bgp, group->conf, afi, safi);
 	}
     }
   for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
@@ -4876,7 +4888,7 @@ bgp_config_write_family (struct vty *vty, struct bgp *bgp, afi_t afi,
 	  if (! CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
 	    {
 	      bgp_config_write_family_header (vty, afi, safi, &write);
-	      bgp_config_write_peer (vty, bgp, peer, afi, safi);
+	      bgp_config_write_peer_af (vty, bgp, peer, afi, safi);
 	    }
 	}
     }
@@ -4909,7 +4921,14 @@ bgp_config_write (struct vty *vty)
       vty_out (vty, "bgp config-type cisco%s", VTY_NEWLINE);
       write++;
     }
-
+  
+  /* BGP Config Afi type. */
+  if (bgp_option_check (BGP_OPT_CONFIG_AFI))
+    {    
+      vty_out (vty, "bgp config-afi%s", VTY_NEWLINE);
+      write++;
+    }
+  
   /* BGP configuration. */
   for (ALL_LIST_ELEMENTS (bm->bgp, mnode, mnnode, bgp))
     {
@@ -5029,10 +5048,12 @@ bgp_config_write (struct vty *vty)
 	bgp_config_write_damp (vty);
 
       /* BGP static route configuration. */
-      bgp_config_write_network (vty, bgp, AFI_IP, SAFI_UNICAST, &write);
+      if (!bgp_option_check (BGP_OPT_CONFIG_AFI))
+        bgp_config_write_network (vty, bgp, AFI_IP, SAFI_UNICAST, &write);
 
       /* BGP redistribute configuration. */
-      bgp_config_write_redistribute (vty, bgp, AFI_IP, SAFI_UNICAST, &write);
+      if (!bgp_option_check (BGP_OPT_CONFIG_AFI))
+        bgp_config_write_redistribute (vty, bgp, AFI_IP, SAFI_UNICAST, &write);
 
       /* BGP timers configuration. */
       if (bgp->default_keepalive != BGP_DEFAULT_KEEPALIVE
@@ -5043,14 +5064,21 @@ bgp_config_write (struct vty *vty)
       /* peer-group */
       for (ALL_LIST_ELEMENTS (bgp->group, node, nnode, group))
 	{
-	  bgp_config_write_peer (vty, bgp, group->conf, AFI_IP, SAFI_UNICAST);
+	  bgp_config_write_peer_global (vty, bgp, group->conf);
+	  if (!bgp_option_check (BGP_OPT_CONFIG_AFI))
+	    bgp_config_write_peer_af (vty, bgp, group->conf,
+	                              AFI_IP, SAFI_UNICAST);
 	}
 
       /* Normal neighbor configuration. */
       for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
 	{
-	  if (! CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
-	    bgp_config_write_peer (vty, bgp, peer, AFI_IP, SAFI_UNICAST);
+	  if (CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
+	    continue;
+          
+	  bgp_config_write_peer_global (vty, bgp, peer);
+	  if (!bgp_option_check (BGP_OPT_CONFIG_AFI))
+	    bgp_config_write_peer_af (vty, bgp, peer, AFI_IP, SAFI_UNICAST);
 	}
 
       /* Distance configuration. */
@@ -5059,7 +5087,11 @@ bgp_config_write (struct vty *vty)
       /* No auto-summary */
       if (bgp_option_check (BGP_OPT_CONFIG_CISCO))
 	vty_out (vty, " no auto-summary%s", VTY_NEWLINE);
-
+      
+      /* IPv4 unicast configuration */
+      if (bgp_option_check (BGP_OPT_CONFIG_AFI))
+        write += bgp_config_write_family (vty, bgp, AFI_IP, SAFI_UNICAST);
+      
       /* IPv4 multicast configuration.  */
       write += bgp_config_write_family (vty, bgp, AFI_IP, SAFI_MULTICAST);
 

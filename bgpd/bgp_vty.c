@@ -279,6 +279,27 @@ DEFUN (no_bgp_config_type,
   return CMD_SUCCESS;
 }
 
+DEFUN (bgp_config_afi,
+       bgp_config_afi_cmd,
+       "bgp config-afi",
+       BGP_STR
+       "Use 'address-family' configuration stanzas for all AFIs, inc. IPv4\n")
+{
+  bgp_option_set (BGP_OPT_CONFIG_AFI);
+  return CMD_SUCCESS;
+}
+
+DEFUN (no_bgp_config_afi,
+       no_bgp_config_afi_cmd,
+       "no bgp config-afi",
+       NO_STR
+       BGP_STR
+       "Use address-family configuration stanzas for all AFIs, inc. IPv4\n")
+{
+  bgp_option_unset (BGP_OPT_CONFIG_AFI);
+  return CMD_SUCCESS;
+}
+
 DEFUN (no_synchronization,
        no_synchronization_cmd,
        "no synchronization",
@@ -8819,6 +8840,10 @@ bgp_vty_init (void)
   /* "bgp config-type" commands. */
   install_element (CONFIG_NODE, &bgp_config_type_cmd);
   install_element (CONFIG_NODE, &no_bgp_config_type_cmd);
+
+  /* "bgp config-afi" commands. */
+  install_element (CONFIG_NODE, &bgp_config_afi_cmd);
+  install_element (CONFIG_NODE, &no_bgp_config_afi_cmd);
 
   /* Dummy commands (Currently not supported) */
   install_element (BGP_NODE, &no_synchronization_cmd);
