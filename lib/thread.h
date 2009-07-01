@@ -51,13 +51,15 @@ struct thread_master
   struct thread_list ready;
   struct thread_list unuse;
   struct thread_list background;
+  struct thread_list child;
+  struct thread_list wait;
   fd_set readfd;
   fd_set writefd;
   fd_set exceptfd;
   unsigned long alloc;
 };
 
-typedef unsigned char thread_type;
+typedef unsigned short thread_type;
 
 /* Thread itself. */
 struct thread
@@ -73,6 +75,9 @@ struct thread
     int val;			/* second argument of the event. */
     int fd;			/* file descriptor in case of read/write. */
     struct timeval sands;	/* rest of time sands value. */
+    pid_t child;		/* Child to wait for */
+    int (*fin) (struct thread *); /* Callback to parent when child finishes */
+    int status;
   } u;
   RUSAGE_T ru;			/* Indepth usage info.  */
   struct cpu_thread_history *hist; /* cache pointer to cpu_history */
@@ -110,6 +115,7 @@ enum quagga_clkid {
 #define THREAD_BACKGROUND     5
 #define THREAD_UNUSED         6
 #define THREAD_EXECUTE        7
+#define THREAD_CHILD          8
 
 /* Thread yield time.  */
 #define THREAD_YIELD_TIME_SLOT     10 * 1000L /* 10ms */
@@ -118,6 +124,7 @@ enum quagga_clkid {
 #define THREAD_ARG(X) ((X)->arg)
 #define THREAD_FD(X)  ((X)->u.fd)
 #define THREAD_VAL(X) ((X)->u.val)
+#define THREAD_CHILD_STATUS(X) ((X)->u.status)
 
 #define THREAD_READ_ON(master,thread,func,arg,sock) \
   do { \
@@ -156,6 +163,8 @@ enum quagga_clkid {
 #define thread_add_timer_msec(m,f,a,v) funcname_thread_add_timer_msec(m,f,a,v,#f)
 #define thread_add_event(m,f,a,v) funcname_thread_add_event(m,f,a,v,#f)
 #define thread_execute(m,f,a,v) funcname_thread_execute(m,f,a,v,#f)
+#define thread_add_child(m,f,a,v) funcname_thread_add_child(m,f,a,v,#f)
+#define thread_do_child(m,f,a,v) funcname_thread_do_child(m,f,a,v,#f)
 
 /* The 4th arg to thread_add_background is the # of milliseconds to delay. */
 #define thread_add_background(m,f,a,v) funcname_thread_add_background(m,f,a,v,#f)
@@ -187,6 +196,17 @@ extern struct thread *funcname_thread_add_background (struct thread_master *,
 extern struct thread *funcname_thread_execute (struct thread_master *,
                                                int (*)(struct thread *),
                                                void *, int, const char *);
+extern struct thread *funcname_thread_add_child (struct thread_master *,
+                                               int (*)(struct thread *),
+                                               void *,
+                                               int (*)(struct thread *),
+                                               const char *);
+extern pid_t funcname_thread_do_child (struct thread_master *,
+                                       int (*)(struct thread *),
+                                       void *,
+                                       int (*)(struct thread *),
+                                       const char *);
+
 extern void thread_cancel (struct thread *);
 extern unsigned int thread_cancel_event (struct thread_master *, void *);
 extern struct thread *thread_fetch (struct thread_master *, struct thread *);

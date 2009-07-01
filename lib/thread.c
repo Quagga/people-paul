@@ -40,6 +40,7 @@ static struct timeval relative_time_base;
 static unsigned short timers_inited;
 
 static struct hash *cpu_record = NULL;
+static pid_t thread_fork (struct thread *);
 
 /* Struct timeval's tv_usec one second value.  */
 #define TIMER_SECOND_MICRO 1000000L
@@ -253,13 +254,14 @@ vty_out_cpu_thread_history(struct vty* vty,
 	  a->real.total/1000, a->real.total%1000, a->total_calls,
 	  a->real.total/a->total_calls, a->real.max);
 #endif
-  vty_out(vty, " %c%c%c%c%c%c %s%s",
+  vty_out(vty, " %c%c%c%c%c%c%c %s%s",
 	  a->types & (1 << THREAD_READ) ? 'R':' ',
 	  a->types & (1 << THREAD_WRITE) ? 'W':' ',
 	  a->types & (1 << THREAD_TIMER) ? 'T':' ',
 	  a->types & (1 << THREAD_EVENT) ? 'E':' ',
 	  a->types & (1 << THREAD_EXECUTE) ? 'X':' ',
 	  a->types & (1 << THREAD_BACKGROUND) ? 'B' : ' ',
+	  a->types & (1 << THREAD_CHILD) ? 'C' : ' ',
 	  a->funcname, VTY_NEWLINE);
 }
 
@@ -305,7 +307,7 @@ cpu_record_print(struct vty *vty, thread_type filter)
 #ifdef HAVE_RUSAGE
   vty_out(vty, " Avg uSec Max uSecs");
 #endif
-  vty_out(vty, "  Type  Thread%s", VTY_NEWLINE);
+  vty_out(vty, "  Type   Thread%s", VTY_NEWLINE);
   hash_iterate(cpu_record,
 	       (void(*)(struct hash_backet*,void*))cpu_record_hash_print,
 	       args);
@@ -356,6 +358,10 @@ DEFUN(show_thread_cpu,
 	    case 'B':
 	      filter |= (1 << THREAD_BACKGROUND);
 	      break;
+	    case 'c':
+	    case 'C':
+	      filter |= (1 << THREAD_CHILD);
+	      break;
 	    default:
 	      break;
 	    }
@@ -364,7 +370,7 @@ DEFUN(show_thread_cpu,
       if (filter == 0)
 	{
 	  vty_out(vty, "Invalid filter \"%s\" specified,"
-                  " must contain at least one of 'RWTEXB'%s",
+                  " must contain at least one of 'RWTEXBC'%s",
 		  argv[0], VTY_NEWLINE);
 	  return CMD_WARNING;
 	}
@@ -399,6 +405,8 @@ thread_master_debug (struct thread_master *m)
   thread_list_debug (&m->unuse);
   printf ("bgndlist : ");
   thread_list_debug (&m->background);
+  printf ("bgndlist : ");
+  thread_list_debug (&m->child);
   printf ("total alloc: [%ld]\n", m->alloc);
   printf ("-----------\n");
 }
@@ -490,11 +498,12 @@ thread_list_free (struct thread_master *m, struct thread_list *list)
       list->count--;
       m->alloc--;
     }
+  assert (list->count == 0);
+  list->head = list->tail = NULL;
 }
 
-/* Stop thread scheduler. */
-void
-thread_master_free (struct thread_master *m)
+static void
+thread_master_scrub (struct thread_master *m)
 {
   thread_list_free (m, &m->read);
   thread_list_free (m, &m->write);
@@ -503,7 +512,14 @@ thread_master_free (struct thread_master *m)
   thread_list_free (m, &m->ready);
   thread_list_free (m, &m->unuse);
   thread_list_free (m, &m->background);
-  
+  thread_list_free (m, &m->child);
+}
+
+/* Stop thread scheduler. */
+void
+thread_master_free (struct thread_master *m)
+{
+  thread_master_scrub (m);
   XFREE (MTYPE_THREAD_MASTER, m);
 }
 
@@ -741,7 +757,8 @@ funcname_thread_add_background (struct thread_master *m,
 /* Add simple event thread. */
 struct thread *
 funcname_thread_add_event (struct thread_master *m,
-		  int (*func) (struct thread *), void *arg, int val, const char* funcname)
+		           int (*func) (struct thread *),
+		           void *arg, int val, const char* funcname)
 {
   struct thread *thread;
 
@@ -752,6 +769,42 @@ funcname_thread_add_event (struct thread_master *m,
   thread_list_add (&m->event, thread);
 
   return thread;
+}
+
+/* Add child process thread. */
+struct thread *
+funcname_thread_add_child (struct thread_master *m,
+		           int (*func) (struct thread *),
+		           void *arg, 
+		           int (*fin) (struct thread *),
+		           const char* funcname)
+{
+  struct thread *thread;
+
+  assert (m != NULL);
+
+  thread = thread_get (m, THREAD_CHILD, func, arg, funcname);
+  thread->u.fin = fin;
+  thread_list_add (&m->event, thread);
+
+  return thread;
+}
+
+/* Similar, but does the fork inline */
+pid_t
+funcname_thread_do_child (struct thread_master *m,
+		           int (*func) (struct thread *),
+		           void *arg, 
+		           int (*fin) (struct thread *),
+		           const char* funcname)
+{
+  struct thread *thread;
+
+  assert (m != NULL);
+
+  thread = thread_get (m, THREAD_CHILD, func, arg, funcname);
+  thread->u.fin = fin;
+  return thread_fork (thread);
 }
 
 /* Cancel thread from scheduler. */
@@ -783,6 +836,9 @@ thread_cancel (struct thread *thread)
       break;
     case THREAD_BACKGROUND:
       list = &thread->master->background;
+      break;
+    case THREAD_CHILD:
+      list = &thread->master->child;
       break;
     default:
       return;
@@ -837,7 +893,17 @@ thread_run (struct thread_master *m, struct thread *thread,
   *fetch = *thread;
   thread->type = THREAD_UNUSED;
   thread_add_unuse (m, thread);
+
   return fetch;
+}
+
+/* Make the given thread READY to run, removing it from given list */
+static void
+thread_make_ready (struct thread_list *list, struct thread *t)
+{
+  thread_list_delete (list, t);
+  thread_list_add (&t->master->ready, t);
+  t->type = THREAD_READY;
 }
 
 static int
@@ -857,9 +923,7 @@ thread_process_fd (struct thread_list *list, fd_set *fdset, fd_set *mfdset)
         {
           assert (FD_ISSET (THREAD_FD (thread), mfdset));
           FD_CLR(THREAD_FD (thread), mfdset);
-          thread_list_delete (list, thread);
-          thread_list_add (&thread->master->ready, thread);
-          thread->type = THREAD_READY;
+          thread_make_ready (list, thread);
           ready++;
         }
     }
@@ -871,17 +935,53 @@ static unsigned int
 thread_timer_process (struct thread_list *list, struct timeval *timenow)
 {
   struct thread *thread;
+  struct thread *next;
   unsigned int ready = 0;
   
-  for (thread = list->head; thread; thread = thread->next)
+  for (thread = list->head; thread; thread = next)
     {
+      next = thread->next;
+      
       if (timeval_cmp (*timenow, thread->u.sands) < 0)
         return ready;
-      thread_list_delete (list, thread);
-      thread->type = THREAD_READY;
-      thread_list_add (&thread->master->ready, thread);
+      
+      thread_make_ready (list, thread);
       ready++;
     }
+  return ready;
+}
+
+int
+thread_process_wait (struct thread_master *m)
+{
+  pid_t pid;
+  int status;
+  int ready = 0;
+  
+  while ((pid = waitpid (-1, &status, WNOHANG)) > 0)
+    {
+      struct thread *t;
+      struct thread *next;
+      
+      zlog_debug ("%s: reaped %d", __func__, pid);
+      
+      for (t = m->wait.head; t; t = next)
+        {
+          next = t->next;
+          
+          if (t->u.child == pid)
+            {
+              ready++;
+              thread_make_ready (&m->wait, t);
+            }
+            
+          /* Store the status of the exited child. Note that this overwrites
+           * the storage of the pid..
+           */
+          t->u.status = status;
+        }        
+    }
+  
   return ready;
 }
 
@@ -908,6 +1008,12 @@ thread_fetch (struct thread_master *m, struct thread *fetch)
       /* Normal event are the next highest priority.  */
       if ((thread = thread_trim_head (&m->event)) != NULL)
         return thread_run (m, thread, fetch);
+      
+      /* Check if any children finished, note that this must be done before
+       * going back into the select, in order to be able to act on SIGCHLDs
+       * received.
+       */
+      thread_process_wait (m);
       
       /* If there are any ready threads from previous scheduler runs,
        * process top of them.  
@@ -963,7 +1069,7 @@ thread_fetch (struct thread_master *m, struct thread *fetch)
       if ((thread = thread_trim_head (&m->ready)) != NULL)
         return thread_run (m, thread, fetch);
 #endif
-
+      
       /* Background timer/events, lowest priority */
       thread_timer_process (&m->background, &relative_time);
       
@@ -1020,6 +1126,40 @@ thread_getrusage (RUSAGE_T *r)
 #endif /* HAVE_CLOCK_MONOTONIC */
 }
 
+static pid_t
+thread_fork (struct thread *thread)
+{
+  zlog_debug ("%s: parent pid %d", __func__, getpid());
+  
+  pid_t ret = fork ();
+  
+  if (ret == 0)
+    {
+      thread_master_scrub (thread->master);
+      (*thread->func) (thread);
+      return ret;
+    }
+  
+  if (ret > 0 && thread->u.fin)
+    {
+      /* The thread object in the parent now morphs into a child-completion
+       * thread. The completion callback function is copied over, so that
+       * its storage can be used for the PID to wait on
+       */
+      zlog_debug ("%s: in child, pid %d", __func__, ret);
+      
+      thread_list_add (&thread->master->wait, thread);
+      thread->type = THREAD_EVENT;
+      thread->func = thread->u.fin;
+      thread->u.child = ret;
+      
+      return ret;
+    }
+  
+  zlog_warn ("%s: unable to fork, %s", safe_strerror (errno));
+  return ret;
+}
+
 /* We check thread consumed time. If the system has getrusage, we'll
    use that to get in-depth stats on the performance of the thread in addition
    to wall clock time stats from gettimeofday. */
@@ -1027,6 +1167,7 @@ void
 thread_call (struct thread *thread)
 {
   unsigned long realtime, cputime;
+  struct thread *real = thread->master->unuse.tail;;
   RUSAGE_T ru;
 
  /* Cache a pointer to the relevant cpu history thread, if the thread
@@ -1047,9 +1188,29 @@ thread_call (struct thread *thread)
     }
 
   GETRUSAGE (&thread->ru);
-
-  (*thread->func) (thread);
-
+  
+  switch (thread->type)
+    {
+      case THREAD_CHILD:
+        /* note that 'thread' is a temporary copy of the original thread,
+         * its not the real thread, which is on the unused list.  We need to
+         * grab the real one.
+         *
+         * XXX: Move the thread loop into lib/thread and get rid of the
+         * temporary copy and make concrete the assumption that fetched
+         * threads are called before the next fetch.
+         */
+        assert (real->func == thread->func &&
+                real->u.fin == thread->u.fin &&
+                real->funcname == thread->funcname);
+        
+        thread_list_delete (&thread->master->unuse, real);
+        thread_fork (real);
+        break;
+      default:
+        (*thread->func) (thread);
+    }
+  
   GETRUSAGE (&ru);
 
   realtime = thread_consumed_time (&ru, &thread->ru, &cputime);
