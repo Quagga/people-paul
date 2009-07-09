@@ -27,6 +27,7 @@
 #include "vty.h"
 #include "command.h"
 #include "memory.h"
+#include "sigevent.c"
 
 extern void test_init();
 
@@ -117,7 +118,10 @@ main (int argc, char **argv)
 
   /* master init. */
   master = thread_master_create ();
-
+  
+  zlog_default = openzlog (progname, ZLOG_DEFAULT,
+                             LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
+  
   while (1) 
     {
       int opt;
@@ -167,7 +171,8 @@ main (int argc, char **argv)
   cmd_init (1);
   vty_init (master);
   memory_init ();
-
+  signal_init (master, 0, NULL);
+  
   /* OSPF vty inits. */
   test_vty_init ();
 
@@ -185,7 +190,7 @@ main (int argc, char **argv)
     usage (progname, 1);
   vty_read_config (config_file, NULL);
   
-  test_timer_init();
+  //test_timer_init();
   
   test_init();  
   

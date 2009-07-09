@@ -35,6 +35,7 @@
 #include "command.h"
 #include "memory.h"
 #include "hash.h"
+#include "jhash.h"
 
 extern struct thread_master *master;
 
@@ -80,6 +81,39 @@ var_alloc (void *arg)
   return new;
 }
 
+static void
+var_init (void)
+{
+  char buf[100];
+  struct var v;
+  char *str = "foo";
+  char c;
+  int i;
+  
+  v.name = buf;
+  
+  memset (&buf, '\0', sizeof (buf));
+  
+  for (i = 0; i < sizeof(buf) - 1; i++)
+    {
+      for (c = 'a'; c <= 'z'; c++)
+        {
+          struct var *found;
+          v.data = NULL;
+          
+          buf[i] = c;
+          
+          found = hash_get (var_hash, &v, &var_alloc);
+          
+          if (found->data)
+            XFREE (MTYPE_TMP, found->data);
+          
+          found->data = str;
+        }
+    }
+
+}
+
 DEFUN (set,
        set_cmd,
        "set WORD .LINE",
@@ -121,10 +155,12 @@ var_vty (struct var *v, struct vty *vty)
 static void
 var_iter (struct hash_backet *backet, struct vty *vty)
 {
+  //printf ("in child %s\n",((struct var *) backet->data)->name);
+
   var_vty ((struct var *) backet->data, vty);
 }
 
-DEFUN (view,
+DEFUN_CHILD (view,
        view_cmd,
        "view WORD",
        "view variable\n"
@@ -133,6 +169,8 @@ DEFUN (view,
 {
   struct var var;
   struct var *result;
+  
+  zlog_debug ("in view, %d\n", getpid());
   
   if (!argc)
     {
@@ -156,62 +194,119 @@ DEFUN (view,
   return CMD_SUCCESS;
 }
 
+ALIAS_CHILD (view,
+             view_all_cmd,
+             "view",
+             "view all variables\n")
+
 ALIAS (view,
-       view_all_cmd,
-       "view",
-       "view all variables\n")
+       view2_all_cmd,
+       "view2",
+       "view all variables (in parent process)\n")
+
+struct child_args {
+  struct vty *vty;
+  char *arg;
+};
+
 
 static int
 child_func (struct thread *t)
 {
-  printf ("in child: %s\n", THREAD_ARG(t));
+  struct child_args *ca = THREAD_ARG(t);
+  
+  printf ("in child: %s\n", ca->arg);
+  exit (0);  
 }
 
 static int
 child_finish_func (struct thread *t)
 {
-  printf ("parent: child finished %d %s\n", t->u.child, THREAD_ARG(t));
-  XFREE (MTYPE_TMP, THREAD_ARG(t));
+  struct child_args *ca = THREAD_ARG(t);
+  struct vty *vty = ca->vty;
+  
+  printf ("parent: child finished %d %s\n", t->u.child, ca->arg);
+  vty_out (vty, "parent: child finished %d %s%s",
+           t->u.child, ca->arg, VTY_NEWLINE);
+  
+  XFREE (MTYPE_TMP, ca->arg);
+  XFREE (MTYPE_TMP, ca);
+  
+  return CMD_SUCCESS;
 }
 
-DEFUN (child,
-       child_cmd,
-       "child WORD",
-       "run a child process\n"
+DEFUN (child_thread,
+       child_thread_cmd,
+       "child-thread WORD",
+       "run a child process, with fork deferred to thread\n"
        "word to pass to the child\n")
+{
+  struct child_args *ca;
+  if (argc != 1)
+    {
+      vty_out (vty, "%% word argument required%s", VTY_NEWLINE);
+      return CMD_WARNING;
+    }
+
+  ca = XMALLOC (MTYPE_TMP, sizeof (struct child_args));
+  ca->vty = vty;
+  ca->arg = XSTRDUP (MTYPE_TMP, argv[0]);
+  
+  thread_add_child (master, child_func, ca, child_finish_func);
+  
+  return CMD_SUCCESS;
+}
+
+DEFUN (child_inline,
+       child_inline_cmd,
+       "child-inline WORD",
+       "run a child process, fork done in line\n"
+       "word to pass to the child\n")
+{
+  struct child_args *ca;
+  if (argc != 1)
+    {
+      vty_out (vty, "%% word argument required%s", VTY_NEWLINE);
+      return CMD_WARNING;
+    }
+  
+  ca = XMALLOC (MTYPE_TMP, sizeof (struct child_args));
+  ca->vty = vty;
+  ca->arg = XSTRDUP (MTYPE_TMP, argv[0]);
+  
+  thread_do_child (master, child_func, ca, child_finish_func);
+  
+  return CMD_SUCCESS;
+}
+
+DEFUN_CHILD (child,
+             child_cmd,
+             "child WORD",
+             "run a command as a child process, using vty DEFUN_CHILD\n"
+             "word to pass to the child\n")
 {
   if (argc != 1)
     {
       vty_out (vty, "%% word argument required%s", VTY_NEWLINE);
       return CMD_WARNING;
     }
-  thread_add_child (master, child_func, XSTRDUP (MTYPE_TMP, argv[0]),
-                    child_finish_func);
-}
+  vty_out (vty, "in child: %s%s", argv[0], VTY_NEWLINE);
+  printf ("in child: %s\n", argv[0]);
 
-DEFUN (dochild,
-       dochild_cmd,
-       "dochild WORD",
-       "run a child process directly\n"
-       "word to pass to the child\n")
-{
-  if (argc != 1)
-    {
-      vty_out (vty, "%% word argument required%s", VTY_NEWLINE);
-      return CMD_WARNING;
-    }
-  thread_do_child (master, child_func, XSTRDUP (MTYPE_TMP, argv[0]),
-                   child_finish_func);
+  return CMD_SUCCESS;
 }
 
 void
 test_init (void)
 {
   var_hash = hash_create_size (128, var_key_make, var_cmp);
-  
+  var_init ();
+  printf ("here\n");
   install_element (VIEW_NODE, &set_cmd);
   install_element (VIEW_NODE, &view_cmd);
   install_element (VIEW_NODE, &view_all_cmd);
+  install_element (VIEW_NODE, &view2_all_cmd);
+  install_element (VIEW_NODE, &child_thread_cmd);
+  install_element (VIEW_NODE, &child_inline_cmd);
   install_element (VIEW_NODE, &child_cmd);
-  install_element (VIEW_NODE, &dochild_cmd);
 }
