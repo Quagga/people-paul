@@ -32,7 +32,9 @@ struct vty
 {
   /* File descripter of this vty. */
   int fd;
-
+  
+  int refcount;
+  
   /* Is this vty connect to file or not */
   enum {VTY_TERM, VTY_FILE, VTY_SHELL, VTY_SHELL_SERV} type;
 
@@ -80,8 +82,11 @@ struct vty
   unsigned char escape;
 
   /* Current vty status. */
-  enum {VTY_NORMAL, VTY_CLOSE, VTY_MORE, VTY_MORELINE} status;
-
+  enum {VTY_NORMAL, VTY_CLOSE, VTY_MORE, VTY_MORELINE, VTY_CHILD } status;
+  
+  /* Whether this vty is in a sub-process */
+  enum { VTY_PROC_PARENT, VTY_PROC_CHILD } proc_state;
+  
   /* IAC handling: was the last character received the
      IAC (interpret-as-command) escape character (and therefore the next
      character will be the command code)?  Refer to Telnet RFC 854. */
@@ -218,6 +223,10 @@ extern int vty_config_unlock (struct vty *);
 extern int vty_shell (struct vty *);
 extern int vty_shell_serv (struct vty *);
 extern void vty_hello (struct vty *);
+
+/* For lib/command, to allow it to run some commands as child processes */
+extern void vty_defer_child (struct vty *);
+extern void vty_resume (struct vty *vty);
 
 /* Send a fixed-size message to all vty terminal monitors; this should be
    an async-signal-safe function. */

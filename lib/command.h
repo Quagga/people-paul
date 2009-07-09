@@ -126,8 +126,9 @@ struct cmd_node
 
 enum
 {
-  CMD_ATTR_DEPRECATED = 1,
-  CMD_ATTR_HIDDEN,
+  CMD_ATTR_DEPRECATED 	= 1,
+  CMD_ATTR_HIDDEN 	= 2,
+  CMD_ATTR_CHILD 	= 4,
 };
 
 /* Structure of command element. */
@@ -208,6 +209,9 @@ struct desc
 #define DEFUN_DEPRECATED(funcname, cmdname, cmdstr, helpstr) \
   DEFUN_ATTR (funcname, cmdname, cmdstr, helpstr, CMD_ATTR_DEPRECATED) \
 
+#define DEFUN_CHILD(funcname, cmdname, cmdstr, helpstr) \
+  DEFUN_ATTR (funcname, cmdname, cmdstr, helpstr, CMD_ATTR_CHILD) \
+
 /* DEFUN_NOSH for commands that vtysh should ignore */
 #define DEFUN_NOSH(funcname, cmdname, cmdstr, helpstr) \
   DEFUN(funcname, cmdname, cmdstr, helpstr)
@@ -246,6 +250,9 @@ struct desc
 
 #define ALIAS_DEPRECATED(funcname, cmdname, cmdstr, helpstr) \
   DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, CMD_ATTR_DEPRECATED, 0)
+
+#define ALIAS_CHILD(funcname, cmdname, cmdstr, helpstr) \
+  DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, CMD_ATTR_CHILD, 0)
 
 #define ALIAS_SH(daemon, funcname, cmdname, cmdstr, helpstr) \
   DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, 0, daemon)

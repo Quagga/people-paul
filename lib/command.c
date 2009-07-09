@@ -33,6 +33,9 @@ Boston, MA 02111-1307, USA.  */
 #include "command.h"
 #include "workqueue.h"
 
+/* Provided by the user */
+extern struct thread_master *master;
+
 /* Command vector which includes some level of command lists. Normally
    each daemon maintains each own cmdvec. */
 vector cmdvec = NULL;
@@ -1997,6 +2000,75 @@ node_parent ( enum node_type node )
   return ret;
 }
 
+struct cmd_execution_data {
+  struct cmd_element *cmd;
+  struct vty *vty;
+  int argc;
+  const char **argv;
+};
+
+static int
+cmd_child_func (struct thread *t)
+{
+  struct cmd_execution_data *cdata = THREAD_ARG(t);
+  
+  /* all threads will have been cancelled in this child, so we need to NULL
+   * out the references in the vty to such.
+   */
+  cdata->vty->t_read = NULL;
+  cdata->vty->t_write = NULL;
+  cdata->vty->t_timeout = NULL;
+  
+  return (cdata->cmd->func) (cdata->cmd, cdata->vty,
+                             cdata->argc, cdata->argv);
+}
+
+static int
+cmd_child_finish_func (struct thread *t)
+{
+  struct cmd_execution_data *cdata = THREAD_ARG(t);
+  struct vty *vty = cdata->vty;
+  
+  zlog_debug ("%s: child finished with status %d\n", __func__,
+              WEXITSTATUS(THREAD_CHILD_STATUS(t)));
+  
+  if (WEXITSTATUS(THREAD_CHILD_STATUS(t)) == EXIT_FAILURE)
+    vty_close (cdata->vty);
+  else
+    vty_resume (cdata->vty);
+  
+  XFREE (MTYPE_TMP, cdata);
+}
+
+static int
+cmd_execute_child (struct cmd_element *cmd, struct vty *vty,
+                   int argc, const char *argv[])
+{
+  struct cmd_execution_data *cdata;
+  pid_t ret;
+  
+  /* XXX: allocate type */
+  cdata = XMALLOC (MTYPE_TMP, sizeof(struct cmd_execution_data));
+  
+  cdata->cmd = cmd;
+  cdata->vty = vty;
+  cdata->argc = argc;
+  cdata->argv = argv; /* NB: argv is on stack */
+
+  
+  if ((ret = thread_do_child (master, cmd_child_func,
+                             cdata, cmd_child_finish_func)) > 0)
+    /* vty in parent has to defer handling of the vty to the child, till the
+     * child is done.  The completion callback will tell the vty layer in
+     * parent to resume, if appropriate.
+     */
+    vty_defer_child (vty);
+  else if (0 == ret)
+    vty->proc_state = VTY_PROC_CHILD;
+  
+  return CMD_SUCCESS;
+}
+
 /* Execute command by argument vline vector. */
 static int
 cmd_execute_command_real (vector vline, struct vty *vty,
@@ -2116,6 +2188,9 @@ cmd_execute_command_real (vector vline, struct vty *vty,
     return CMD_SUCCESS_DAEMON;
 
   /* Execute matched command. */
+  if (CHECK_FLAG (matched_element->attr, CMD_ATTR_CHILD))
+    return cmd_execute_child (matched_element, vty, argc, argv);
+  
   return (*matched_element->func) (matched_element, vty, argc, argv);
 }
 

@@ -1,4 +1,4 @@
-/*
+  /*
  * Virtual terminal [aka TeletYpe] interface routine.
  * Copyright (C) 1997, 98 Kunihiro Ishiguro
  *
@@ -51,6 +51,8 @@ enum event
   VTYSH_READ,
   VTYSH_WRITE
 #endif /* VTYSH */
+  VTY_RESUME,
+  VTY_DEFER_CHILD,
 };
 
 static void vty_event (enum event, int, struct vty *);
@@ -89,6 +91,24 @@ static u_char restricted_mode = 0;
 /* Integrated configuration file path */
 char integrate_default[] = SYSCONFDIR INTEGRATE_DEFAULT_CONFIG;
 
+
+/* take a reference */
+static struct vty *
+vty_take (struct vty *vty)
+{
+  assert (vty->refcount >= 0);
+  vty->refcount++;
+  return vty;
+}
+
+static void
+vty_release (struct vty *vty)
+{
+  assert (vty->refcount > 0);
+  vty->refcount--;
+  if (vty->refcount == 0)
+    XFREE (MTYPE_VTY, vty);    
+}
 
 /* VTY standard output function. */
 int
@@ -316,15 +336,16 @@ vty_dont_lflow_ahead (struct vty *vty)
 
 /* Allocate new vty struct. */
 struct vty *
-vty_new ()
+vty_new (void)
 {
   struct vty *new = XCALLOC (MTYPE_VTY, sizeof (struct vty));
 
   new->obuf = buffer_new(0);	/* Use default buffer size. */
   new->buf = XCALLOC (MTYPE_VTY, VTY_BUFSIZ);
   new->max = VTY_BUFSIZ;
-
-  return new;
+  new->proc_state = VTY_PROC_PARENT;
+  
+  return vty_take (new);
 }
 
 /* Authentication of vty */
@@ -1534,12 +1555,16 @@ vty_read (struct thread *thread)
     }
 
   /* Check status. */
-  if (vty->status == VTY_CLOSE)
-    vty_close (vty);
-  else
+  switch (vty->status)
     {
-      vty_event (VTY_WRITE, vty_sock, vty);
-      vty_event (VTY_READ, vty_sock, vty);
+      case VTY_CLOSE:
+        vty_close (vty);
+        break;
+      case VTY_CHILD:
+        return 0;
+      default:
+        vty_event (VTY_WRITE, vty_sock, vty);
+        vty_event (VTY_READ, vty_sock, vty);
     }
   return 0;
 }
@@ -1591,6 +1616,13 @@ vty_flush (struct thread *thread)
       else
 	{
 	  vty->status = VTY_NORMAL;
+	  
+	  /* A child process vty needs to exit at this point and pass
+	   * the state back.
+	   */
+	  if (vty->proc_state == VTY_PROC_CHILD)
+	    exit (EXIT_SUCCESS);
+	  
 	  if (vty->lines == 0)
 	    vty_event (VTY_READ, vty_sock, vty);
 	}
@@ -2157,7 +2189,11 @@ void
 vty_close (struct vty *vty)
 {
   int i;
-
+  
+  /* If this is a child process, just exit back to the parent */
+  if (vty->proc_state == VTY_PROC_CHILD)
+    exit (EXIT_FAILURE);
+  
   /* Cancel threads.*/
   if (vty->t_read)
     thread_cancel (vty->t_read);
@@ -2165,7 +2201,11 @@ vty_close (struct vty *vty)
     thread_cancel (vty->t_write);
   if (vty->t_timeout)
     thread_cancel (vty->t_timeout);
-
+    
+  vty->t_read = NULL;
+  vty->t_write = NULL;
+  vty->t_timeout = NULL;
+  
   /* Flush buffer. */
   buffer_flush_all (vty->obuf, vty->fd);
 
@@ -2183,7 +2223,8 @@ vty_close (struct vty *vty)
   /* Close socket. */
   if (vty->fd > 0)
     close (vty->fd);
-
+  vty->fd = -1;
+  
   if (vty->address)
     XFREE (MTYPE_TMP, vty->address);
   if (vty->buf)
@@ -2191,9 +2232,8 @@ vty_close (struct vty *vty)
 
   /* Check configure. */
   vty_config_unlock (vty);
-
-  /* OK free vty. */
-  XFREE (MTYPE_VTY, vty);
+  
+  vty_release (vty);
 }
 
 /* When time out occur output message then close connection. */
@@ -2492,11 +2532,30 @@ vty_config_unlock (struct vty *vty)
 /* Master of the threads. */
 static struct thread_master *master;
 
+void
+vty_defer_child (struct vty *vty)
+{
+  /* really it's the calling command layer that's stashed the reference to
+   * the vty, but we handle it here
+   */
+  vty_take (vty);
+  vty_event (VTY_DEFER_CHILD, vty->fd, vty);
+}
+
+void
+vty_resume (struct vty *vty)
+{
+  if (vty->status != VTY_CLOSE)
+    vty_event (VTY_RESUME, vty->fd, vty);
+  
+  vty_release (vty);
+}
+
 static void
 vty_event (enum event event, int sock, struct vty *vty)
 {
   struct thread *vty_serv_thread;
-
+  
   switch (event)
     {
     case VTY_SERV:
@@ -2515,6 +2574,9 @@ vty_event (enum event event, int sock, struct vty *vty)
       break;
 #endif /* VTYSH */
     case VTY_READ:
+      assert (vty->fd == sock);
+      assert (vty->status != VTY_CLOSE);
+
       vty->t_read = thread_add_read (master, vty_read, vty, sock);
 
       /* Time out treatment. */
@@ -2527,6 +2589,9 @@ vty_event (enum event event, int sock, struct vty *vty)
 	}
       break;
     case VTY_WRITE:
+      assert (vty->fd == sock);
+      assert (vty->status != VTY_CLOSE);
+
       if (! vty->t_write)
 	vty->t_write = thread_add_write (master, vty_flush, vty, sock);
       break;
@@ -2541,6 +2606,26 @@ vty_event (enum event event, int sock, struct vty *vty)
 	  vty->t_timeout = 
 	    thread_add_timer (master, vty_timeout, vty, vty->v_timeout);
 	}
+      break;
+    case VTY_DEFER_CHILD:
+      assert (vty->fd == sock);
+      assert (vty->status != VTY_CLOSE);
+
+      if (vty->t_read)
+        thread_cancel (vty->t_read);
+      if (vty->t_write)
+        thread_cancel (vty->t_write);
+      vty->t_read = NULL;
+      vty->t_write = NULL;
+      vty->status = VTY_CHILD;
+      break;
+    case VTY_RESUME:
+      assert (vty->fd == sock);
+      assert (vty->status != VTY_CLOSE);
+
+      vty_event (VTY_READ, sock, vty);
+      vty_event (VTY_WRITE, sock, vty);
+      vty->status = VTY_NORMAL;
       break;
     }
 }
