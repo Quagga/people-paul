@@ -2247,6 +2247,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
       if ((afi == AFI_IP || afi == AFI_IP6)
 	  && safi == SAFI_UNICAST 
 	  && (peer_sort (peer) == BGP_PEER_IBGP
+              || peer_sort (peer) == BGP_PEER_CONFED
 	      || (peer_sort (peer) == BGP_PEER_EBGP && peer->ttl != 1)
 	      || CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK)))
 	{
@@ -2293,6 +2294,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
   if ((afi == AFI_IP || afi == AFI_IP6)
       && safi == SAFI_UNICAST
       && (peer_sort (peer) == BGP_PEER_IBGP
+          || peer_sort (peer) == BGP_PEER_CONFED
 	  || (peer_sort (peer) == BGP_PEER_EBGP && peer->ttl != 1)
 	  || CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK)))
     {
@@ -2726,10 +2728,9 @@ bgp_clear_node_complete (struct work_queue *wq)
 static void
 bgp_clear_node_queue_init (struct peer *peer)
 {
-#define CLEAR_QUEUE_NAME_LEN 26 /* "clear 2001:123:123:123::1" */
-  char wname[CLEAR_QUEUE_NAME_LEN];
+  char wname[sizeof("clear xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx")];
   
-  snprintf (wname, CLEAR_QUEUE_NAME_LEN, "clear %s", peer->host);
+  snprintf (wname, sizeof(wname), "clear %s", peer->host);
 #undef CLEAR_QUEUE_NAME_LEN
 
   if ( (peer->clear_node_queue = work_queue_new (bm->master, wname)) == NULL)
